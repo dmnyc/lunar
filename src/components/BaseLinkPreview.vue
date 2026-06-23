@@ -6,7 +6,7 @@
 </template>
 
 <script>
-import fetch from 'cross-fetch'
+// fetch is a browser global; cross-fetch dependency removed in the overhaul
 
 export default {
   name: 'BaseLinkPreview',

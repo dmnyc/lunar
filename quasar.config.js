@@ -6,270 +6,151 @@
  */
 
 // Configuration for your app
-// https://v2.quasar.dev/quasar-cli-webpack/quasar-config-js
+// https://v2.quasar.dev/quasar-cli-vite/quasar-config-js
 
-const webpack = require('webpack')
-const ESLintPlugin = require('eslint-webpack-plugin')
 const { configure } = require('quasar/wrappers')
 
-module.exports = configure(function (ctx) {
-  return {
-    // https://v2.quasar.dev/quasar-cli-webpack/supporting-ts
-    supportTS: false,
+module.exports = configure(async function (/* ctx */) {
+  // vite-plugin-node-polyfills is ESM-only; load it via dynamic import so this
+  // CommonJS config (what @quasar/app-vite v1 expects) can still use it.
+  const { nodePolyfills } = await import('vite-plugin-node-polyfills')
 
-    // https://v2.quasar.dev/quasar-cli-webpack/prefetch-feature
+  return {
+    // https://v2.quasar.dev/quasar-cli-vite/prefetch-feature
     // preFetch: true,
 
     // app boot file (/src/boot)
     // --> boot files are part of 'main.js'
-    // https://v2.quasar.dev/quasar-cli-webpack/boot-files
-    boot: [
-      'global-components',
-      'i18n'
-    ],
+    // https://v2.quasar.dev/quasar-cli-vite/boot-files
+    boot: ['unregister-sw', 'pinia', 'auth', 'global-components', 'i18n'],
 
-    // https://v2.quasar.dev/quasar-cli-webpack/quasar-config-js#Property%3A-css
+    // https://v2.quasar.dev/quasar-cli-vite/quasar-config-js#css
     css: ['app.scss'],
 
     // https://github.com/quasarframework/quasar/tree/dev/extras
     extras: [
-      // 'ionicons-v4',
-      // 'mdi-v5',
-      // 'fontawesome-v6',
-      // 'eva-icons',
-      // 'themify',
-      // 'line-awesome',
-      // 'roboto-font-latin-ext', // this or either 'roboto-font', NEVER both!
-
       'roboto-font', // optional, you are not bound to it
-      'material-icons', // optional, you are not bound to it
+      'material-icons' // optional, you are not bound to it
     ],
 
-    // Full list of options: https://v2.quasar.dev/quasar-cli-webpack/quasar-config-js#Property%3A-build
+    // Full list of options: https://v2.quasar.dev/quasar-cli-vite/quasar-config-js#build
     build: {
-      vueRouterMode: 'history', // available values: 'hash', 'history'
+      target: {
+        browser: ['es2022', 'firefox115', 'chrome115', 'safari14'],
+        node: 'node20'
+      },
 
-      // transpile: false,
+      vueRouterMode: 'history', // available values: 'hash', 'history'
       publicPath: '/',
 
-      // Add dependencies for transpiling with Babel (Array of string/regex)
-      // (from node_modules, which are by default not transpiled).
-      // Applies only if 'transpile' is set to true.
-      // transpileDependencies: [],
+      // The 2022 codebase imports .vue components without the extension (the
+      // old webpack resolver allowed it). Teach Vite's resolver to do the same
+      // so those imports keep working.
+      extendViteConf(viteConf) {
+        viteConf.resolve = viteConf.resolve || {}
+        const base = viteConf.resolve.extensions || [
+          '.mjs',
+          '.js',
+          '.mts',
+          '.ts',
+          '.jsx',
+          '.tsx',
+          '.json'
+        ]
+        if (!base.includes('.vue')) base.push('.vue')
+        viteConf.resolve.extensions = base
 
-      // rtl: true, // https://quasar.dev/options/rtl-support
-      // preloadChunks: true,
-      // showProgress: false,
-      // gzip: true,
-      // analyze: true,
-
-      // Options below are automatically set depending on the env, set them if you want to override
-      // extractCSS: false,
-
-      // https://v2.quasar.dev/quasar-cli-webpack/handling-webpack
-      // 'chain' is a webpack-chain object https://github.com/neutrinojs/webpack-chain
-
-      chainWebpack(chain) {
-        chain
-          .plugin('eslint-webpack-plugin')
-          .use(ESLintPlugin, [{ extensions: ['js', 'vue'] }])
+        // Some transitive deps (readable-stream, pulled in by lnurl-pay) read
+        // process.version.slice(...) at module-eval; the node polyfill's
+        // process shim doesn't define `version`, so give it concrete literals.
+        viteConf.define = viteConf.define || {}
+        viteConf.define['process.browser'] = 'true'
+        viteConf.define['process.version'] = JSON.stringify('v18.0.0')
       },
 
-      // blergh
-      extendWebpack(cfg) {
-        cfg.plugins.push(
-          new webpack.ProvidePlugin({
-            Buffer: ['buffer', 'Buffer']
-          })
-        )
-        cfg.resolve.alias = cfg.resolve.alias || {}
-        cfg.resolve.alias.stream = 'readable-stream'
-        cfg.resolve.fallback = cfg.resolve.fallback || {}
-        cfg.resolve.fallback.buffer = require.resolve('buffer/')
-        cfg.resolve.fallback.stream = require.resolve('readable-stream')
-        cfg.resolve.fallback.crypto = false
-        cfg.resolve.fallback.path = false
-        cfg.resolve.fallback.fs = false
-        cfg.experiments = cfg.experiments || {}
-        cfg.experiments.asyncWebAssembly = true
-        cfg.module = cfg.module || { rules: [] }
-        cfg.module.rules.push({ test: /\.wasm$/, type: 'asset/inline' })
-      },
+      // Browser-shim Node builtins that the nostr/wallet stack reaches for
+      // (Buffer, crypto, stream) — replaces the old webpack ProvidePlugin.
+      vitePlugins: [
+        [
+          nodePolyfills,
+          {
+            include: ['buffer', 'crypto', 'stream', 'util', 'process'],
+            globals: { Buffer: true, global: true, process: true }
+          }
+        ]
+      ]
     },
 
-    // Full list of options: https://v2.quasar.dev/quasar-cli-webpack/quasar-config-js#Property%3A-devServer
+    // Full list of options: https://v2.quasar.dev/quasar-cli-vite/quasar-config-js#devserver
     devServer: {
-      server: {
-        type: 'http',
-      },
-      port: 8080,
+      // https: true,
       open: false, // opens browser window automatically
-      // headers: {
-      //   'Cross-Origin-Opener-Policy': 'same-origin',
-      //   'Cross-Origin-Embedder-Policy': 'require-corp'
-      // },
-      // proxy: {
-      //   '/api': {
-      //     target: 'https://astral.ninja',
-      //     secure: false,
-      //   }
-      // }
+      port: 8080
     },
 
-    // https://v2.quasar.dev/quasar-cli-webpack/quasar-config-js#Property%3A-framework
+    // https://v2.quasar.dev/quasar-cli-vite/quasar-config-js#framework
     framework: {
       config: {
         dark: true,
         notify: {
-          closeBtn: true,
+          closeBtn: true
         }
       },
 
-      // iconSet: 'material-icons', // Quasar icon set
-      // lang: 'en-US', // Quasar language pack
-
-      // For special cases outside of where the auto-import strategy can have an impact
-      // (like functional components as one of the examples),
-      // you can manually specify Quasar components/directives to be available everywhere:
-      //
-      // components: [],
-      // directives: [],
-
       // Quasar plugins
-      plugins: ['Notify', 'Dialog', 'Meta'],
-
+      plugins: ['Notify', 'Dialog', 'Meta', 'LocalStorage', 'SessionStorage']
     },
 
     // animations: 'all', // --- includes all animations
     // https://quasar.dev/options/animations
     animations: [],
 
-    // https://v2.quasar.dev/quasar-cli-webpack/developing-ssr/configuring-ssr
+    // https://v2.quasar.dev/quasar-cli-vite/developing-ssr/configuring-ssr
     ssr: {
-      pwa: false,
-
-      // manualStoreHydration: true,
-      // manualPostHydrationTrigger: true,
-
-      prodPort: 3000, // The default port that the production server should use
-      // (gets superseded if process.env.PORT is specified at runtime)
-
-      maxAge: 1000 * 60 * 60 * 24 * 30,
-      // Tell browser when a file from the server should expire from cache (in ms)
-
-      chainWebpackWebserver(chain) {
-        chain
-          .plugin('eslint-webpack-plugin')
-          .use(ESLintPlugin, [{ extensions: ['js'] }])
-      },
-
-      middlewares: [
-        ctx.prod ? 'compression' : '',
-        'render', // keep this as last one
-      ],
+      prodPort: 3000,
+      middlewares: ['render'],
+      pwa: false
     },
 
-    // https://v2.quasar.dev/quasar-cli-webpack/developing-pwa/configuring-pwa
+    // https://v2.quasar.dev/quasar-cli-vite/developing-pwa/configuring-pwa
     pwa: {
-      workboxPluginMode: 'GenerateSW', // 'GenerateSW' or 'InjectManifest'
-      workboxOptions: { skipWaiting: true }, // only for GenerateSW
-
-      // for the custom service worker ONLY (/src-pwa/custom-service-worker.[js|ts])
-      // if using workbox in InjectManifest mode
-
-      chainWebpackCustomSW(chain) {
-        chain
-          .plugin('eslint-webpack-plugin')
-          .use(ESLintPlugin, [{ extensions: ['js'] }])
-      },
-
+      workboxMode: 'generateSW', // 'generateSW' or 'injectManifest'
+      injectPwaMetaTags: true,
+      swFilename: 'sw.js',
+      manifestFilename: 'manifest.json',
+      useCredentialsForManifestTag: false,
       manifest: {
-        name: `astral`,
-        short_name: `astral`,
-        description: `decentralized social platform (nostr client)`,
+        name: 'astral',
+        short_name: 'astral',
+        description: 'decentralized social platform (nostr client)',
         display: 'standalone',
         orientation: 'portrait',
         background_color: '#1f1f1f',
-        theme_color: '#027be3',
+        theme_color: '#1f1f1f',
         icons: [
-          {
-            src: 'icons/favicon-32x32.png',
-            sizes: '32x32',
-            type: 'image/png',
-          },
-          {
-            src: 'icons/favicon-128x128.png',
-            sizes: '128x128',
-            type: 'image/png',
-          },
-          {
-            src: 'icons/android-chrome-192x192.png',
-            sizes: '192x192',
-            type: 'image/png',
-          },
-          {
-            src: 'icons/favicon-256x256.png',
-            sizes: '256x256',
-            type: 'image/png',
-          },
-          {
-            src: 'icons/favicon-384x384.png',
-            sizes: '384x384',
-            type: 'image/png',
-          },
-          {
-            src: 'icons/android-chrome-512x512.png',
-            sizes: '512x512',
-            type: 'image/png',
-          },
-        ],
-      },
+          { src: 'icons/favicon-32x32.png', sizes: '32x32', type: 'image/png' },
+          { src: 'icons/favicon-128x128.png', sizes: '128x128', type: 'image/png' },
+          { src: 'icons/android-chrome-192x192.png', sizes: '192x192', type: 'image/png' },
+          { src: 'icons/favicon-256x256.png', sizes: '256x256', type: 'image/png' },
+          { src: 'icons/favicon-384x384.png', sizes: '384x384', type: 'image/png' },
+          { src: 'icons/android-chrome-512x512.png', sizes: '512x512', type: 'image/png' }
+        ]
+      }
     },
 
-    // Full list of options: https://v2.quasar.dev/quasar-cli-webpack/developing-cordova-apps/configuring-cordova
-    cordova: {
-      // noIosLegacyBuildFlag: true, // uncomment only if you know what you are doing
-    },
-
-    // Full list of options: https://v2.quasar.dev/quasar-cli-webpack/developing-capacitor-apps/configuring-capacitor
+    // Full list of options: https://v2.quasar.dev/quasar-cli-vite/developing-capacitor-apps/configuring-capacitor
     capacitor: {
-      hideSplashscreen: true,
+      hideSplashscreen: true
     },
 
-    // Full list of options: https://v2.quasar.dev/quasar-cli-webpack/developing-electron-apps/configuring-electron
+    // Full list of options: https://v2.quasar.dev/quasar-cli-vite/developing-electron-apps/configuring-electron
     electron: {
-      bundler: 'packager', // 'packager' or 'builder'
-
-      packager: {
-        // https://github.com/electron-userland/electron-packager/blob/master/docs/api.md#options
-        // OS X / Mac App Store
-        // appBundleId: '',
-        // appCategoryType: '',
-        // osxSign: '',
-        // protocol: 'myapp://path',
-        // Windows only
-        // win32metadata: { ... }
-      },
-
+      inspectPort: 5858,
+      bundler: 'packager',
+      packager: {},
       builder: {
-        // https://www.electron.build/configuration/configuration
-
-        appId: 'quasar-project',
-      },
-
-      // 'chain' is a webpack-chain object https://github.com/neutrinojs/webpack-chain
-
-      chainWebpackMain(chain) {
-        chain
-          .plugin('eslint-webpack-plugin')
-          .use(ESLintPlugin, [{ extensions: ['js'] }])
-      },
-
-      chainWebpackPreload(chain) {
-        chain
-          .plugin('eslint-webpack-plugin')
-          .use(ESLintPlugin, [{ extensions: ['js'] }])
-      },
-    },
+        appId: 'ninja.astral'
+      }
+    }
   }
 })

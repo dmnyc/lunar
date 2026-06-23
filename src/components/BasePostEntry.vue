@@ -737,11 +737,37 @@ export default {
         //   this.insertText(`@${mention.tag[1]}`, range)
         // } else this.insertText(`#[${idx}]`, range)
       }
-      textarea.style.maxHeight = '0'
-      this.postEntry.appendChild(textarea)
-      let text = textarea.innerText
-      textarea.remove()
-      return text
+      return this.contentToText(textarea)
+    },
+
+    // Serialize a contenteditable element to plain text deterministically.
+    //
+    // We can't use innerText here: Chrome renders a blank line (an empty
+    // <div><br></div> block) as TWO newlines — the block boundary plus the
+    // <br> — so a single intended blank line published as two. This walks the
+    // DOM treating each block element as exactly one line break before its
+    // content and each <br> as one newline, which matches what the user typed.
+    contentToText(el) {
+      let out = ''
+      const walk = (node) => {
+        node.childNodes.forEach((child) => {
+          if (child.nodeType === Node.TEXT_NODE) {
+            out += child.textContent
+          } else if (child.nodeName === 'BR') {
+            out += '\n'
+          } else if (child.nodeName === 'IMG') {
+            out += child.getAttribute('alt') || ''
+          } else if (child.nodeName === 'DIV' || child.nodeName === 'P') {
+            if (out && !out.endsWith('\n')) out += '\n'
+            walk(child)
+          } else {
+            // inline elements (span, etc.) — descend without a line break
+            walk(child)
+          }
+        })
+      }
+      walk(el)
+      return out
     },
 
     async updateMentionsTags() {

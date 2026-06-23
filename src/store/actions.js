@@ -32,6 +32,10 @@ export async function launch(store) {
 }
 
 let mainSub = {}
+// Tracks the newest kind-3 created_at we've adopted. Replaces the old SQL
+// created_at lookup so a relay serving a stale contact list can't clobber a
+// newer follows set.
+let latestContactListAt = 0
 export async function restartMainSubscription(store) {
   // get relays
   let relays = Object.keys(store.state.relays).length ? Object.keys(store.state.relays) : Object.keys(store.state.defaultRelays)
@@ -51,16 +55,21 @@ export async function restartMainSubscription(store) {
         if (event.kind === 0) {
           store.dispatch('handleAddingProfileEventToCache', event)
         } else if (event.pubkey === store.state.keys.pub && event.kind === 3) {
-          let result = await dbQuery(`
-            SELECT json_extract(event,'$.created_at') created_at
-            FROM nostr
-            WHERE json_extract(event,'$.kind') = 3 AND
-              json_extract(event,'$.pubkey') = '${store.state.keys.pub}'
-            LIMIT 1
-          `)
-          if (result.length && event.created_at < result[0].created_at) return
-          let relays = JSON.parse(event.content)
-          store.commit('setRelays', relays)
+          // Skip stale/duplicate contact lists (relays may resend older ones).
+          if (event.created_at <= latestContactListAt) continue
+          latestContactListAt = event.created_at
+
+          // Legacy astral stored the relay list as JSON in kind-3 content;
+          // modern kind-3 events leave content empty (relays live in NIP-65
+          // kind-10002). Only adopt content when it actually parses — a bad or
+          // empty content must never abort the follows update below.
+          if (event.content && event.content.trim()) {
+            try {
+              store.commit('setRelays', JSON.parse(event.content))
+            } catch (_) {
+              /* not legacy relay JSON — ignore */
+            }
+          }
 
           let follows = event.tags
             .filter(([t, v]) => t === 'p' && v)
@@ -284,6 +293,16 @@ export async function publishEvent(store, {unpublishedEvent}) {
     default:
       eventTypeWordy = `kind ${unpublishedEvent.kind}`
   }
+  // NIP-89 client tag — identifies astral as the publishing client. Added
+  // before signing so it's covered by the signature. Skipped for kind 4 DMs
+  // (no client fingerprint on private messages) and never duplicated.
+  if (
+    unpublishedEvent.kind !== 4 &&
+    !(unpublishedEvent.tags || []).some((t) => t[0] === 'client')
+  ) {
+    unpublishedEvent.tags = [...(unpublishedEvent.tags || []), ['client', 'astral']]
+  }
+
   try {
     let event = await signAsynchronously(unpublishedEvent, store)
     let publishResult = await publish(event, relays)

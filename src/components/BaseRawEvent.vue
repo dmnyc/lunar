@@ -14,7 +14,7 @@
 import helpersMixin from '../utils/mixin'
 import {cleanEvent} from '../utils/event'
 import BaseButtonCopy from 'components/BaseButtonCopy.vue'
-import * as DOMPurify from 'dompurify'
+import DOMPurify from 'dompurify'
 
 export default {
   name: 'BaseRawEvent',

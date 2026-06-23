@@ -6,7 +6,7 @@ import {nip04, nip19} from 'nostr-tools'
 // import { decode, encode } from 'bech32-buffer'
 // import { bech32 } from 'bech32'
 import { bech32 } from '@scure/base'
-import * as DOMPurify from 'dompurify'
+import DOMPurify from 'dompurify'
 // import { utils } from 'lnurl-pay'
 import { Buffer } from 'buffer'
 import {Notify} from 'quasar'
@@ -141,8 +141,39 @@ export default {
         const displayName = store.getters.displayName(profile)
         return `[@${displayName}](/${profile})`
       }
+      // NIP-27: nostr:npub / nprofile / note / nevent / naddr entities embedded
+      // in content. The 2022 client only understood the deprecated #[index]
+      // form, so these rendered as raw "nostr:npub1..." text.
+      const nostrEntityReplacer = (match, entity) => {
+        try {
+          const {type, data} = nip19.decode(entity)
+          if (type === 'npub') {
+            store.dispatch('useProfile', {pubkey: data})
+            return `[@${store.getters.displayName(data)}](/${entity})`
+          }
+          if (type === 'nprofile') {
+            const npub = this.hexToBech32(data.pubkey, 'npub')
+            store.dispatch('useProfile', {pubkey: data.pubkey})
+            return `[@${store.getters.displayName(data.pubkey)}](/${npub})`
+          }
+          if (type === 'note') {
+            mentions.mentionEvents.push(data)
+            return `[${shorten(entity)}](/${entity})`
+          }
+          if (type === 'nevent') {
+            const note = this.hexToBech32(data.id, 'note')
+            mentions.mentionEvents.push(data.id)
+            return `[${shorten(note)}](/${note})`
+          }
+        } catch (_) { /* not a valid entity — leave as written */ }
+        return match
+      }
 
-      let replacedText = text.replace(/#\[(\d+)\]/g, replacer)
+      let nostrReplacedText = text.replace(
+        /nostr:((?:npub1|nprofile1|note1|nevent1|naddr1)[023456789acdefghjklmnpqrstuvwxyz]+)/g,
+        nostrEntityReplacer
+      )
+      let replacedText = nostrReplacedText.replace(/#\[(\d+)\]/g, replacer)
       let hashtagReplacedText = replacedText.replace(/(?<s>^|[\s])#([\w]{1,63})\b/g, hashtagReplacer)
       let untaggedProfileReplacedText = hashtagReplacedText.replace(/@([\w]{64})/g, untaggedProfileReplacer)
       let replacedTextFinal = untaggedProfileReplacedText

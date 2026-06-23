@@ -1,182 +1,301 @@
-const worker = new Worker(new URL('./query.worker.js', import.meta.url))
+// NDK-backed reimplementation of the old worker query facade.
+//
+// The original query.js spawned query.worker.js (which drove relay.worker.js +
+// a sql.js cache over a MessageChannel). This module keeps the exact same
+// exported surface — same function names, argument shapes, return contracts,
+// and the { update, cancel } stream handle — but services everything through
+// the single NDK instance in src/nostr/ndk.js. That lets the legacy Vuex store
+// and all existing components keep working unchanged while the data layer is
+// modernized underneath them.
+//
+// Contracts preserved from the worker API:
+//   - call-style fns resolve to an array of plain events (or a single
+//     event / number where the old code expected that).
+//   - stream-style fns take (settings, cb, eoseCb), invoke cb with an ARRAY of
+//     events per emission, eoseCb once on EOSE, and return { update, cancel }.
 
-const hub = {}
+import { NDKRelaySet, NDKSubscriptionCacheUsage } from '@nostr-dev-kit/ndk'
+import ndk, { connect, NDKEvent } from './nostr/ndk'
 
-worker.onmessage = ev => {
-  let { id, success, error, data, stream, type, notice, eose } = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data
+const now = () => Math.round(Date.now() / 1000)
 
-  if (type) {
-    // console.debug(ev.data)
-    return
-  }
-
-  if (notice) {
-    // Notify.create({
-    //   message: `Relay ${notice.relay} says: ${notice.message}`,
-    //   color: 'info'
-    // })
-    return
-  }
-
-  if (eose) {
-    // console.log('🖴', id, '~>>', data)
-    if (hub[id] && hub[id].eoseCb) hub[id].eoseCb()
-    return
-  }
-
-  if (stream) {
-    // console.log('🖴', id, '~>>', data)
-    // if (id.startsWith('dbTagKind')) console.log('🖴', id, '~>>', data, hub[id])
-    if (!success) console.log('ERROR', id, '~>>', data, hub[id], error)
-    else if (hub[id] && hub[id].cb) hub[id].cb(data)
-    return
-  }
-
-  if (!success) {
-  // console.log('🖴', id, '->', data)
-    hub[id].reject(new Error(error))
-    delete hub[id]
-    return
-  }
-
-  // if (data) console.debug('🖴', id, '->', data)
-  // console.log('🖴', id, '->', data, hub[id])
-  hub[id]?.resolve?.(data)
-  delete hub[id]
+function toRaw(ndkEvent) {
+  return ndkEvent.rawEvent ? ndkEvent.rawEvent() : ndkEvent
 }
 
-export function call(name, args) {
-  let id = name + ' ' + Math.random().toString().slice(-4)
-  // console.debug('🖴', id, '<-', args)
-  // console.log('🖴', id, '<-', args)
-  // worker.postMessage({ id, name, args })
-  worker.postMessage(JSON.parse(JSON.stringify({ id, name, args, call: true })))
-  return new Promise((resolve, reject) => {
-    hub[id] = { resolve, reject }
+function relaySet(relays) {
+  if (relays && relays.length) {
+    try {
+      return NDKRelaySet.fromRelayUrls(relays, ndk)
+    } catch (_) {
+      return undefined
+    }
+  }
+  return undefined
+}
+
+// Collect events from a one-shot subscription, resolving on EOSE OR after a
+// timeout. NDK 2.10's fetchEvents() can hang indefinitely for some filters
+// (notably tag filters like #p) when a relay never sends EOSE, which left pages
+// like Notifications blank. Driving the subscription ourselves guarantees the
+// promise always settles with whatever arrived.
+function collect(filter, relays, { timeout = 4000 } = {}) {
+  return new Promise((resolve) => {
+    const events = new Map()
+    let settled = false
+    const finish = () => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      try {
+        sub.stop()
+      } catch (_) {
+        /* already stopped */
+      }
+      resolve([...events.values()])
+    }
+    const sub = ndk.subscribe(
+      filter,
+      { closeOnEose: true, groupable: false, cacheUsage: NDKSubscriptionCacheUsage.CACHE_FIRST },
+      relaySet(relays)
+    )
+    sub.on('event', (event) => {
+      const raw = toRaw(event)
+      if (raw && raw.id) events.set(raw.id, raw)
+    })
+    sub.on('eose', finish)
+    const timer = setTimeout(finish, timeout)
   })
 }
 
-export function stream(name, args, cb, eoseCb) {
-  let id = name + ' ' + Math.random().toString().slice(-4)
-  hub[id] = {cb, eoseCb}
-  // console.debug('db <-', id, args)
-  worker.postMessage(JSON.stringify({ id, name, args, stream: true }))
-  return {
-    update(...args) {
-      worker.postMessage(JSON.stringify({ id, name, args, stream: true }))
-    },
-    cancel() {
-      worker.postMessage(JSON.stringify({ id, cancel: true }))
-      delete hub[id]
+// One-shot fetch → array of plain events.
+async function fetchMany(filter, relays) {
+  await connect()
+  return collect(filter, relays)
+}
+
+// One-shot fetch → single (newest) plain event or null.
+async function fetchOne(filter, relays) {
+  await connect()
+  const events = await collect(filter, relays)
+  if (!events.length) return null
+  return events.reduce((newest, e) => (e.created_at > newest.created_at ? e : newest))
+}
+
+// Generic live subscription that matches the old stream() contract. filterFn
+// maps a settings object to { filter, relays }.
+function makeStream(filterFn) {
+  return function (settings = {}, cb = () => {}, eoseCb = () => {}) {
+    let sub = null
+
+    const start = (s) => {
+      const { filter, relays } = filterFn(s)
+      const subscription = ndk.subscribe(
+        filter,
+        { closeOnEose: false, groupable: false },
+        relaySet(relays)
+      )
+      subscription.on('event', (event) => {
+        try {
+          cb([toRaw(event)])
+        } catch (err) {
+          console.error('[query] stream cb error', err)
+        }
+      })
+      subscription.on('eose', () => eoseCb())
+      return subscription
+    }
+
+    connect().then(() => {
+      sub = start(settings)
+    })
+
+    return {
+      update(newSettings) {
+        if (sub) sub.stop()
+        sub = start(newSettings || settings)
+      },
+      cancel() {
+        if (sub) sub.stop()
+        sub = null
+      }
     }
   }
 }
 
+// ── relay status / publish ───────────────────────────────────────────────
 
 export async function getRelayStatus() {
-  return call('getRelayStatus', [])
+  await connect()
+  const status = {}
+  ndk.pool.relays.forEach((relay, url) => {
+    status[url] = { status: relay.status, connected: relay.connectivity?.connected ?? false }
+  })
+  return status
 }
 
 export async function publish(event, relays) {
-  return call('publish', [event, relays])
+  await connect()
+  const ndkEvent = new NDKEvent(ndk, event)
+  try {
+    const published = await ndkEvent.publish(relaySet(relays))
+    // NDK returns a Set of relays the event reached.
+    return published ? published.size || true : false
+  } catch (err) {
+    console.error('[query] publish failed', err)
+    return false
+  }
 }
 
+// ── one-shot fetches (call-style) ──────────────────────────────────────────
+
 export async function getFeed(settings = {}) {
-  return call('getFeed', [settings])
+  const { authors, limit = 10, relays, since = 0, until = now() } = settings
+  const filter = { kinds: [1, 2], limit, until }
+  if (since) filter.since = since
+  if (authors?.length) filter.authors = authors
+  return fetchMany(filter, relays)
 }
 
 export async function getProfiles(settings = {}) {
-  return call('getProfiles', [settings])
+  const { authors, relays } = settings
+  const filter = { kinds: [0] }
+  if (authors?.length) filter.authors = authors
+  return fetchMany(filter, relays)
 }
 
 export async function getEvents(settings = {}) {
-  return call('getEvents', [settings])
+  const { ids, relays } = settings
+  if (!ids?.length) return []
+  return fetchMany({ ids }, relays)
 }
 
 export async function getNotes(settings = {}) {
-  return call('getNotes', [settings])
+  const { authors, limit = 10, until = now(), relays } = settings
+  return fetchMany({ kinds: [1], authors, limit, until }, relays)
 }
 
-export async function streamMainProfilesFollows(settings = {}, callback = () => {}, eoseCallback = () => {}) {
-  return stream('streamMainProfilesFollows', [settings], callback, eoseCallback)
+// ── live subscriptions (stream-style) ──────────────────────────────────────
+
+export const streamMainProfilesFollows = makeStream(({ authors, relays }) => ({
+  filter: { kinds: [0, 3], authors },
+  relays
+}))
+
+export const streamMainMentions = makeStream(({ authors, relays, limit = 200 }) => ({
+  filter: { kinds: [1], '#p': authors, limit },
+  relays
+}))
+
+export const streamMainIncomingMessages = makeStream(({ authors, relays, limit = 200 }) => ({
+  filter: { kinds: [4], '#p': authors, limit },
+  relays
+}))
+
+export const streamMainOutgoingMessages = makeStream(({ authors, relays, limit = 200 }) => ({
+  filter: { kinds: [4], authors, limit },
+  relays
+}))
+
+export const streamPeerIncomingMessages = makeStream(({ authors, peers, relays, limit = 500 }) => ({
+  filter: { kinds: [4], '#p': authors, authors: peers, limit },
+  relays
+}))
+
+export const streamPeerOutgoingMessages = makeStream(({ authors, peers, relays, limit = 500 }) => ({
+  filter: { kinds: [4], authors, '#p': peers, limit },
+  relays
+}))
+
+export const streamProfile = makeStream(({ authors, relays }) => ({
+  filter: { kinds: [0], authors },
+  relays
+}))
+
+export const dbStreamEvent = makeStream(({ ids, relays }) => ({
+  filter: { ids },
+  relays
+}))
+
+export const dbStreamFollows = makeStream(({ author, relays }) => ({
+  filter: { kinds: [3], authors: [author] },
+  relays
+}))
+
+export const dbStreamFollowers = makeStream(({ author, relays }) => ({
+  filter: { kinds: [3], '#p': [author] },
+  relays
+}))
+
+export const dbStreamTagKind = makeStream(({ type, values, kinds, limit = 500, relays }) => ({
+  filter: { ['#' + type]: values, kinds, limit },
+  relays
+}))
+
+// ── cache-style reads (db*) ────────────────────────────────────────────────
+// These read cache-first and fall back to relays, returning the same shapes
+// the sql.js-backed worker did.
+
+export async function dbSave(/* event */) {
+  // NDK's cache adapter persists events seen on subscriptions automatically;
+  // explicit saves are a no-op kept for call-site compatibility.
+  return true
 }
 
-export async function streamMainMentions(settings = {}, callback = () => {}, eoseCallback = () => {}) {
-  return stream('streamMainMentions', [settings], callback, eoseCallback)
-}
-
-export async function streamMainIncomingMessages(settings = {}, callback = () => {}, eoseCallback = () => {}) {
-  return stream('streamMainIncomingMessages', [settings], callback, eoseCallback)
-}
-
-export async function streamMainOutgoingMessages(settings = {}, callback = () => {}, eoseCallback = () => {}) {
-  return stream('streamMainOutgoingMessages', [settings], callback, eoseCallback)
-}
-
-export async function streamPeerIncomingMessages(settings = {}, callback = () => {}, eoseCallback = () => {}) {
-  return stream('streamPeerIncomingMessages', [settings], callback, eoseCallback)
-}
-
-export async function streamPeerOutgoingMessages(settings = {}, callback = () => {}, eoseCallback = () => {}) {
-  return stream('streamPeerOutgoingMessages', [settings], callback, eoseCallback)
-}
-
-export async function streamProfile(settings = {}, callback = () => {}, eoseCallback = () => {}) {
-  return stream('streamProfile', [settings], callback, eoseCallback)
-}
-
-export async function dbStreamEvent(settings = {}, callback = () => {}, eoseCallback = () => {}) {
-  return stream('dbStreamEvent', [settings], callback, eoseCallback)
-}
-
-export async function dbStreamFollows(settings = {}, callback = () => {}, eoseCallback = () => {}) {
-  return stream('dbStreamFollows', [settings], callback, eoseCallback)
-}
-
-export async function dbStreamFollowers(settings = {}, callback = () => {}, eoseCallback = () => {}) {
-  return stream('dbStreamFollowers', [settings], callback, eoseCallback)
-}
-
-export async function dbStreamTagKind(settings = {}, callback = () => {}, eoseCallback = () => {}) {
-  return stream('dbStreamTagKind', [settings], callback, eoseCallback)
-}
-
-export async function dbSave(event) {
-  return call('dbSave', [event])
-}
-
-export async function dbQuery(sql) {
-  return call('dbQuery', [sql])
+export async function dbQuery(/* sql */) {
+  // The raw-SQL cache (sql.js) was removed in the overhaul. Callers that ran
+  // ad-hoc SQL (DevTools, the kind-3 created_at guard) get an empty result.
+  console.warn('[query] dbQuery: raw SQL backend removed in overhaul')
+  return []
 }
 
 export async function dbEvent(id) {
-  return call('dbEvent', [id])
+  return fetchOne({ ids: [id] })
 }
 
 export async function dbProfile(pubkey) {
-  return call('dbProfile', [pubkey])
+  return fetchOne({ kinds: [0], authors: [pubkey] })
 }
 
 export async function dbFollows(pubkey) {
-  return call('dbFollows', [pubkey])
+  return fetchMany({ kinds: [3], authors: [pubkey], limit: 1 })
 }
 
 export async function dbChats(pubkey) {
-  return call('dbChats', [pubkey])
+  // Conversation summaries were a SQL aggregation. Approximate by returning the
+  // recent DM events the user is party to; Inbox derives peers from these.
+  const incoming = await fetchMany({ kinds: [4], '#p': [pubkey], limit: 200 })
+  const outgoing = await fetchMany({ kinds: [4], authors: [pubkey], limit: 200 })
+  return [...incoming, ...outgoing]
 }
 
-export async function dbMessages(userPubkey, peerPubkey, limit = 50, until = Math.round(Date.now() / 1000)) {
-  return call('dbMessages', [userPubkey, peerPubkey, limit, until])
+export async function dbMessages(userPubkey, peerPubkey, limit = 50, until = now()) {
+  const events = await fetchMany({
+    kinds: [4],
+    authors: [userPubkey, peerPubkey],
+    '#p': [userPubkey, peerPubkey],
+    until,
+    limit
+  })
+  return events.sort((a, b) => a.created_at - b.created_at)
 }
 
-export async function dbMentions(pubkey, limit = 40, until = Math.round(Date.now() / 1000)) {
-  return call('dbMentions', [pubkey, limit, until])
+export async function dbMentions(pubkey, limit = 40, until = now()) {
+  const events = await fetchMany({ kinds: [1], '#p': [pubkey], until, limit })
+  return events.sort((a, b) => b.created_at - a.created_at)
 }
 
 export async function dbUnreadMessagesCount(userPubkey, peerPubkey, since = 0) {
-  return call('dbUnreadMessagesCount', [userPubkey, peerPubkey, since])
+  const events = await fetchMany({
+    kinds: [4],
+    authors: [peerPubkey],
+    '#p': [userPubkey],
+    since
+  })
+  return events.length
 }
 
 export async function dbUnreadMentionsCount(pubkey, since = 0) {
-  return call('dbUnreadMentionsCount', [pubkey, since])
+  const events = await fetchMany({ kinds: [1], '#p': [pubkey], since })
+  return events.length
 }

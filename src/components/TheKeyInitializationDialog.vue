@@ -101,6 +101,53 @@
       {{ hexKey }}
       </div> -->
       </q-form>
+
+      <div class='q-mt-sm flex column' style='gap: .4rem;'>
+        <h2 class="text-subtitle2 q-pr-md">or sign in with a signer</h2>
+        <div class='flex row no-wrap' style='gap: .4rem;'>
+          <q-btn
+            v-if='hasExtension'
+            size='sm'
+            color='primary'
+            outline
+            class='col'
+            icon-right='extension'
+            label='browser extension'
+            :loading='extensionConnecting'
+            @click='loginWithExtension'
+          />
+          <q-btn
+            size='sm'
+            color='primary'
+            outline
+            class='col'
+            icon-right='vpn_key'
+            label='remote signer'
+            @click='showBunker = !showBunker'
+          />
+        </div>
+        <div v-if='showBunker' class='flex column' style='gap: .3rem;'>
+          <div class='flex row no-wrap items-end' style='gap: .3rem;'>
+            <q-input
+              v-model='bunkerString'
+              dense
+              outlined
+              class='col'
+              label='bunker:// connection string'
+              hint='paste a bunker:// string from Amber or Primal'
+            />
+            <q-btn
+              size='sm'
+              color='positive'
+              label='connect'
+              :loading='bunkerConnecting'
+              :disable='!bunkerString'
+              @click='loginWithBunker'
+            />
+          </div>
+        </div>
+        <span v-if='signerError' class='text-negative' style='font-size: .8rem;'>{{ signerError }}</span>
+      </div>
       <q-expansion-item
         v-if='isKeyValid'
         dense
@@ -171,8 +218,8 @@
 <script>
 import { defineComponent } from 'vue'
 import helpersMixin from '../utils/mixin'
-// import { nip06 } from 'nostr-tools'
-import { generatePrivateKey, nip06 } from 'nostr-tools'
+import { generatePrivateKey, nip06 } from '../utils/ntcompat'
+import { getAuthManager } from '../nostr/authManager'
 // import { decode } from 'bech32-buffer'
 import BaseSelectMultiple from 'components/BaseSelectMultiple.vue'
 import BaseInformation from 'components/BaseInformation.vue'
@@ -202,6 +249,11 @@ export default defineComponent({
       hasExtension: false,
       selectedRelays: this.$store.state.defaultRelays,
       newRelay: '',
+      showBunker: false,
+      bunkerString: '',
+      bunkerConnecting: false,
+      extensionConnecting: false,
+      signerError: '',
     }
   },
 
@@ -323,7 +375,52 @@ export default defineComponent({
     addNewRelay() {
       if (this.newRelay && this.newRelay.length) this.selectedRelays[this.newRelay] = {read: true, write: false}
       this.newRelay = ''
-    }
+    },
+
+    // Finish a remote-signer login: store the pubkey (no private key — signing
+    // is delegated to the active NDK signer), then launch like proceed() does.
+    finishRemoteLogin(pub) {
+      this.$store.commit('setDefaultRelays', this.selectedRelays)
+      this.$store.dispatch('initKeys', { pub })
+      this.$store.dispatch('launch')
+      this.$router.push({ name: 'settings', params: { initUser: true } })
+    },
+
+    async loginWithExtension() {
+      this.signerError = ''
+      const auth = getAuthManager()
+      if (!auth) {
+        this.signerError = 'signer not ready, please reload'
+        return
+      }
+      this.extensionConnecting = true
+      try {
+        const pub = await auth.authenticateWithNIP07()
+        this.finishRemoteLogin(pub)
+      } catch (err) {
+        this.signerError = err?.message || 'could not connect to extension'
+      } finally {
+        this.extensionConnecting = false
+      }
+    },
+
+    async loginWithBunker() {
+      this.signerError = ''
+      const auth = getAuthManager()
+      if (!auth) {
+        this.signerError = 'signer not ready, please reload'
+        return
+      }
+      this.bunkerConnecting = true
+      try {
+        const pub = await auth.authenticateWithNIP46(this.bunkerString.trim())
+        this.finishRemoteLogin(pub)
+      } catch (err) {
+        this.signerError = err?.message || 'could not connect to remote signer'
+      } finally {
+        this.bunkerConnecting = false
+      }
+    },
   },
 })
 </script>

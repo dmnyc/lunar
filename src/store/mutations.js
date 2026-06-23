@@ -1,5 +1,4 @@
-import {getPublicKey} from 'nostr-tools'
-import {nip06} from 'nostr-tools'
+import {getPublicKey, nip06, privateKeyFromSeedWords} from '../utils/ntcompat'
 // import Vuex from 'vuex'
 
 export function setKeys(state, {mnemonic, priv, pub} = {}) {
@@ -8,8 +7,7 @@ export function setKeys(state, {mnemonic, priv, pub} = {}) {
   }
 
   if (mnemonic) {
-    let seed = nip06.seedFromWords(mnemonic)
-    priv = nip06.privateKeyFromSeed(seed)
+    priv = privateKeyFromSeedWords(mnemonic)
   }
 
   if (priv) {

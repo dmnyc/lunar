@@ -38,7 +38,7 @@
 
 <script>
 import helpersMixin from '../utils/mixin'
-import fetch from 'cross-fetch'
+// fetch is a browser global; cross-fetch dependency removed in the overhaul
 import {Notify} from 'quasar'
 
 export default {

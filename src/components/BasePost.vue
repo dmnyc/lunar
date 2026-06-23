@@ -291,7 +291,7 @@ import BaseButtonCopy from 'components/BaseButtonCopy.vue'
 import BaseMarkdown from 'components/BaseMarkdown.vue'
 import BaseRelayRecommend from 'components/BaseRelayRecommend.vue'
 import BaseButtonLightning from 'components/BaseButtonLightning.vue'
-import * as DOMPurify from 'dompurify'
+import DOMPurify from 'dompurify'
 
 export default defineComponent({
   name: 'BasePost',

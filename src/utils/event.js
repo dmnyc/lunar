@@ -1,6 +1,7 @@
-import * as DOMPurify from 'dompurify'
+import DOMPurify from 'dompurify'
 // import { Dialog } from 'quasar'
-import {getEventHash, signEvent} from 'nostr-tools'
+import {getEventHash, signEvent} from './ntcompat'
+import ndk from '../nostr/ndk'
 
 export function cleanEvent(event) {
   return {
@@ -42,9 +43,22 @@ export function isValidEvent(event) {
 
 export async function signAsynchronously(event, store) {
   event.id = getEventHash(event)
+
+  // Local private key — sign directly.
   if (store.state.keys.priv) {
     event.sig = signEvent(event, store.state.keys.priv)
-  } else if (window.nostr) {
+    return event
+  }
+
+  // Remote/extension signer established by the AuthManager (NIP-07 or NIP-46).
+  // NDK routes to whichever signer is active; this covers both uniformly.
+  if (ndk.signer) {
+    event.sig = await ndk.signer.sign(event)
+    return event
+  }
+
+  // Fallback: a raw NIP-07 extension that was never wired through the signer.
+  if (window.nostr) {
     let signatureOrEvent = await window.nostr.signEvent(event)
     switch (typeof signatureOrEvent) {
       case 'string':
