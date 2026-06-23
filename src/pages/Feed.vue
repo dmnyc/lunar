@@ -15,19 +15,21 @@
         :label='"load " + unreadFeed.length + " unread"'
         @click='loadUnread'
       />
-      <div
-        v-for='(item, index) in items'
-        :key='index'
-        class='feed-item'
+      <q-virtual-scroll
+        :items='items'
+        :virtual-scroll-item-size='250'
+        @virtual-scroll='onVirtualScroll'
+        v-slot='{ item, index }'
       >
-        <BasePostThread
-          :events="item"
-          class='full-width'
-          fetch-root-reply
-          @add-event='processEvent'
-        />
-        <div v-if='index === items.length - 6' v-intersection='handleIntersectionObserver'></div>
-      </div>
+        <div :key='index' class='feed-item'>
+          <BasePostThread
+            :events="item"
+            class='full-width'
+            fetch-root-reply
+            @add-event='processEvent'
+          />
+        </div>
+      </q-virtual-scroll>
           <div v-if='loadingMore' class='row justify-center q-py-sm'>
             <q-spinner-orbit color="accent" size='md' />
           </div>
@@ -144,8 +146,8 @@ export default defineComponent({
       feedName: 'follows',
       // The 10s refresh poll keeps appending to unreadFeed for as long as the
       // page stays open; cap it so an idle-but-open feed can't leak unbounded.
-      // (The visible feed itself stays unbounded for endless scroll — off-screen
-      // render memory is bounded via content-visibility on the feed items.)
+      // (The visible feed itself stays unbounded for endless scroll — its DOM is
+      // bounded by q-virtual-scroll, which only mounts the visible slice.)
       maxUnreadLength: 200,
       since: Math.round(Date.now() / 1000),
       until: Math.round(Date.now() / 1000),
@@ -317,10 +319,12 @@ export default defineComponent({
       return false
     },
 
-    handleIntersectionObserver(e) {
-      // console.log('handleIntersectionObserver', e)
+    onVirtualScroll({ to }) {
+      // Load older threads as the rendered window approaches the end of the
+      // list. q-virtual-scroll only mounts the visible slice, so the DOM stays
+      // bounded no matter how far the user scrolls.
       if (this.loadingMore) return
-      if (e.isIntersecting) this.loadMore()
+      if (to >= this.items.length - 6) this.loadMore()
     },
 
     // printDetails(details) {
@@ -342,14 +346,4 @@ export default defineComponent({
   width: 0px;
 }
 
-/* Keep endless scroll while bounding render memory: off-screen feed items skip
-   layout/paint and let the browser release their decoded-image memory, which is
-   the dominant cost in a long image-heavy feed. contain-intrinsic-size keeps the
-   scrollbar/geometry stable; the `auto` keyword remembers each item's real
-   height after it has been rendered once. (No-op on browsers without
-   content-visibility support — no regression there.) */
-.feed-item {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 300px;
-}
 </style>
