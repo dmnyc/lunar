@@ -172,10 +172,13 @@ export default defineComponent({
         return
       }
 
-      if (this.isBech32Key(this.searchingProfile) && this.bech32ToHex(this.searchingProfile).match(/^[a-f0-9A-F]{64}$/)) {
-        if (this.searchingProfile.startsWith('npub')) this.toProfile(this.bech32ToHex(this.searchingProfile))
-        else if (this.searchingProfile.startsWith('note')) this.toEvent(this.bech32ToHex(this.searchingProfile))
-        else return
+      // npub/nprofile → profile, note/nevent → event (bech32ToHex normalizes
+      // nevent/nprofile objects to their hex id/pubkey)
+      const q = this.searchingProfile.trim()
+      const hex = this.bech32ToHex(q)
+      if (hex && /^[a-f0-9]{64}$/i.test(hex)) {
+        if (q.startsWith('npub') || q.startsWith('nprofile')) this.toProfile(hex)
+        else if (q.startsWith('note') || q.startsWith('nevent')) this.toEvent(hex)
         this.searchingProfile = ''
         this.searching = false
         return

@@ -3,6 +3,10 @@ import {dbProfile, dbEvent} from '../query'
 export function shorten(str, number = 5) {
   if (!str) return ''
   let prefix = str.slice(0, 4)
+  if (str.startsWith('nevent') || str.startsWith('nprofile')) {
+    let p = str.startsWith('nevent') ? 'nevent' : 'nprofile'
+    return str.slice(0, number + p.length) + '…' + str.slice(-(number))
+  }
   if (['npub', 'nsec', 'note'].includes(prefix)) return str.slice(0, number + prefix.length) + '…' + str.slice(-(number))
   return str ? str.slice(0, number) + '…' + str.slice(-(number)) : ''
 }

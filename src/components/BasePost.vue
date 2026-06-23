@@ -68,7 +68,7 @@
           >
             <span>in reply to&nbsp;</span>
             <a @click.stop="toEvent(tagged)">
-              {{ shorten(hexToBech32(tagged, 'note')) }}
+              {{ shorten(getNote(tagged)) }}
             </a>
           </q-item-label>
         </div>
@@ -249,10 +249,10 @@
             <span class='text-caption'>
               copy the formatted event ID below and paste it in any post to embed this event
             </span>
-            <BaseButtonCopy :button-text="hexToBech32(event.id, 'note')" color='primary' flat tooltip-text='copy event ID'/>
+            <BaseButtonCopy :button-text="getNote(event.id)" color='primary' flat tooltip-text='copy event ID'/>
             <br>
             <span class='text-primary' style='word-break: break-all;'>
-              {{ hexToBech32(event.id, 'note') }}
+              {{ getNote(event.id) }}
             </span>
           </q-tab-panel>
           <q-tab-panel name="reply" class='q-pa-sm'>

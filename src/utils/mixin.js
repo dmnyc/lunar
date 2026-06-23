@@ -59,7 +59,19 @@ export default {
     },
 
     getNote(id) {
-      return this.hexToBech32(id, 'note')
+      // Standardize on nevent (richer: carries author + relay hints). note1
+      // strings are still accepted everywhere they're parsed.
+      try {
+        const ev = this.$store?.state?.eventsCache?.[id]
+        const relays = Object.keys(this.$store?.state?.relays || {}).slice(0, 2)
+        return nip19.neventEncode({
+          id,
+          author: ev?.pubkey,
+          relays: relays.length ? relays : undefined
+        })
+      } catch (_) {
+        return this.hexToBech32(id, 'note')
+      }
     },
 
     toProfile(pubkey) {
@@ -128,7 +140,8 @@ export default {
           mentions.mentionEvents.push(eventId)
           // if repost remove text
           if (match.length === text.length) return ''
-          return `[${shorten(this.hexToBech32(eventId, 'note'))}](/${this.hexToBech32(eventId, 'note')})`
+          const nevent = this.getNote(eventId)
+          return `[${shorten(nevent)}](/${nevent})`
         } else if (tags[Number(index)][0] === 'p') {
           const profile = tags[Number(index)][1]
           const displayName = store.getters.displayName(profile)
@@ -162,9 +175,8 @@ export default {
             return `[${shorten(entity)}](/${entity})`
           }
           if (type === 'nevent') {
-            const note = this.hexToBech32(data.id, 'note')
             mentions.mentionEvents.push(data.id)
-            return `[${shorten(note)}](/${note})`
+            return `[${shorten(entity)}](/${entity})`
           }
         } catch (_) { /* not a valid entity — leave as written */ }
         return match
@@ -350,11 +362,12 @@ export default {
 
     bech32ToHex(key) {
       try {
-        let { data } = nip19.decode(key)
+        let { type, data } = nip19.decode(key)
+        // nevent/nprofile decode to objects — pull out the hex id/pubkey so
+        // callers always get a hex string (note/npub/nsec already are hex).
+        if (type === 'nevent') return data.id
+        if (type === 'nprofile') return data.pubkey
         return data
-        // let { words } = bech32.decode(key)
-        // let buffer = Buffer.from(bech32.fromWords(words))
-        // return this.toHexString(buffer)
       } catch (error) {
         // console.log('bech32ToHex error: ', error)
       }

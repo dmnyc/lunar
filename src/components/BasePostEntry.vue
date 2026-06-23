@@ -106,7 +106,7 @@
       <span>posting in {{ countdown.remaining }}s…</span>
       <div class='flex row' style='gap: .4rem;'>
         <q-btn size='sm' flat dense label='cancel' color='negative' @click.stop='cancelCountdown'/>
-        <q-btn size='sm' unelevated dense label='post now' color='primary' @click.stop='postNow'/>
+        <q-btn size='sm' outline dense label='post now' color='primary' @click.stop='postNow'/>
       </div>
     </div>
     <div class='flex justify-between' :class='toolSelected ? "column" : "row"' @click.stop>
@@ -701,19 +701,20 @@ export default {
     async extractMentions(el, tags) {
       // const mentionRegex = /\B@(?<p>[a-f0-9]{64})\b/g
       // const mentionRegex = /@((?<t>[a-z]{1}):{1})?(?<p>[a-f0-9]{64})\b/g
-      const mentionRegex = /(?<t>note|npub)(?<v>[a-z0-9]{59})\b/g
+      // Accept note1/npub1 (fixed) plus nevent1/nprofile1 (variable length).
+      const mentionRegex = /(?<t>note1|nevent1|nprofile1|npub1)(?<v>[a-z0-9]+)/g
       const textNodeTreeWalker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null, false)
       let tagIndexMap = {}
       let node = textNodeTreeWalker.nextNode()
       while (node) {
         let text = node.textContent
         for (let match of text.matchAll(mentionRegex)) {
-          let type = null
-          if (match.groups.t === 'note') type = 'e'
-          else if (match.groups.t === 'npub') type = 'p'
-          else return
           let value = match[0]
+          let type = (value.startsWith('note') || value.startsWith('nevent')) ? 'e'
+            : (value.startsWith('npub') || value.startsWith('nprofile')) ? 'p' : null
+          if (!type) continue
           let hexValue = this.bech32ToHex(value)
+          if (!hexValue) continue
           let tagEntries = Object.entries(tags)
           let idx = tagEntries
             .map(([_, tag]) => tag)
@@ -839,7 +840,7 @@ export default {
     async updateMentionsTags() {
       this.trigger++
       let { start } = this.startEndOfRange()
-      const mentionRegex = /(?<t>note|npub)(?<v>[a-z0-9]{59})/g
+      const mentionRegex = /(?<t>note1|nevent1|nprofile1|npub1)(?<v>[a-z0-9]+)/g
       if (this.text.toLowerCase().match(mentionRegex)) {
         this.mentionsUpdating = true
         await this.extractMentions(this.textarea, this.tags)

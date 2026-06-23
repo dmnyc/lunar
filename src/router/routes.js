@@ -31,9 +31,16 @@ const routes = [
         name: 'messages',
       },
       {
-        path: '/:eventId(note[a-z0-9A-Z]{59})',
+        path: '/:eventId(note1[a-z0-9]+)',
         component: () => import('pages/Event.vue'),
         name: 'event',
+      },
+      {
+        // nevent uses a separate route — Vue Router's param-regex parser can't
+        // handle a (?:note1|nevent1) alternation group, so we split them.
+        path: '/:eventId(nevent1[a-z0-9]+)',
+        component: () => import('pages/Event.vue'),
+        name: 'eventNevent',
       },
       {
         path: '/wallet',
