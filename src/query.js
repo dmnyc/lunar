@@ -272,11 +272,28 @@ export async function dbRelayList(pubkey) {
 }
 
 export async function dbChats(pubkey) {
-  // Conversation summaries were a SQL aggregation. Approximate by returning the
-  // recent DM events the user is party to; Inbox derives peers from these.
-  const incoming = await fetchMany({ kinds: [4], '#p': [pubkey], limit: 200 })
-  const outgoing = await fetchMany({ kinds: [4], authors: [pubkey], limit: 200 })
-  return [...incoming, ...outgoing]
+  // Conversation summaries (the old SQL aggregation): one entry per peer with
+  // the latest message timestamp. Inbox renders { peer, lastMessage }.
+  const incoming = await fetchMany({ kinds: [4], '#p': [pubkey], limit: 500 })
+  const outgoing = await fetchMany({ kinds: [4], authors: [pubkey], limit: 500 })
+
+  const latestByPeer = new Map()
+  const consider = (peer, ts) => {
+    if (!peer || peer === pubkey) return
+    const cur = latestByPeer.get(peer)
+    if (cur === undefined || ts > cur) latestByPeer.set(peer, ts)
+  }
+  // incoming: the sender is the peer
+  for (const ev of incoming) consider(ev.pubkey, ev.created_at)
+  // outgoing: the recipient (#p tag) is the peer
+  for (const ev of outgoing) {
+    const pTag = (ev.tags || []).find(([t]) => t === 'p')
+    consider(pTag && pTag[1], ev.created_at)
+  }
+
+  return [...latestByPeer.entries()]
+    .map(([peer, lastMessage]) => ({ peer, lastMessage }))
+    .sort((a, b) => b.lastMessage - a.lastMessage)
 }
 
 export async function dbMessages(userPubkey, peerPubkey, limit = 50, until = now()) {
