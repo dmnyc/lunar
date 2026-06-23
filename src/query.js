@@ -182,8 +182,16 @@ export async function getNotes(settings = {}) {
 
 // ── live subscriptions (stream-style) ──────────────────────────────────────
 
-export const streamMainProfilesFollows = makeStream(({ authors, relays }) => ({
-  filter: { kinds: [0, 3], authors },
+export const streamMainProfilesFollows = makeStream(({ authors, relays, user }) => ({
+  // Profiles (kind 0) for everyone we follow, but contact lists (kind 3) only
+  // for the current user. Requesting kind 3 for every follow streamed each
+  // follow's entire (potentially huge, thousands of tags) contact list into
+  // memory continuously — events the handler discards anyway — which exhausted
+  // memory and crashed mobile clients for accounts with many follows.
+  filter: [
+    { kinds: [0], authors },
+    ...(user ? [{ kinds: [3], authors: [user] }] : []),
+  ],
   relays
 }))
 

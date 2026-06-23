@@ -79,7 +79,7 @@ export async function restartMainSubscription(store) {
   ]
   // create or update main profiles and follows sup
   if (!mainSub.streamMainProfilesFollows) mainSub.streamMainProfilesFollows = await streamMainProfilesFollows(
-    { authors, relays },
+    { authors, relays, user: store.state.keys.pub },
     async events => {
       // console.log('streamMainProfilesFollows', events)
       for (let event of events) {
@@ -111,7 +111,7 @@ export async function restartMainSubscription(store) {
       }
     }
   )
-  else mainSub.streamMainProfilesFollows.update({ authors, relays })
+  else mainSub.streamMainProfilesFollows.update({ authors, relays, user: store.state.keys.pub })
 }
 
 export async function addEvent(store, {event, relay = null}) {
