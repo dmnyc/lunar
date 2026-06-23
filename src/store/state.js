@@ -86,7 +86,8 @@ export default function () {
   let { timestamps, preferences } = config || {}
   let { lastUserMainSync = 0, lastFeedLoad = 0 } = timestamps || {}
   let { color, font = 'Roboto', lightningTips } = preferences || {}
-  let { primary = '#ffffff', secondary = '#aaaaaa', accent = '#777777', background = '#1f1f1f' } = color || {}
+  // Lunar theme is the default (was the white/gray "mono" default in astral).
+  let { primary = '#d671ea', secondary = '#5af2e0', accent = '#ecc865', background = '#1f1f1f' } = color || {}
   let { enabled = true, lastMode = 'copy', lastWallet = null, presets = [10, 100, 1000], oneClick = { enabled: false, amount: 10 } } = lightningTips || {}
   config = {
     timestamps: {

@@ -49,7 +49,7 @@ import { defineComponent } from 'vue'
 import { Notify } from 'quasar'
 import { useWalletStore, WALLET_WEBLN, WALLET_NWC, WALLET_SPARK } from 'stores/wallet'
 import { isWeblnAvailable } from '../nostr/wallet/webln'
-import { backupNwcToNostr, restoreNwcFromNostr } from '../nostr/wallet/nwcBackup'
+import { backupNwcToNostr, restoreNwcFromNostr, canBackup } from '../nostr/wallet/nwcBackup'
 
 export default defineComponent({
   name: 'BaseWalletConnect',
@@ -135,15 +135,37 @@ export default defineComponent({
       this.error = ''
       this.connecting = true
       try {
-        await this.wallet.connectNwcWallet(this.nwcString.trim())
+        const conn = this.nwcString.trim()
+        await this.wallet.connectNwcWallet(conn)
         this.nwcString = ''
         Notify.create({ message: 'wallet connected ⚡' })
         this.wallet.refreshBalance()
+        this.offerBackup(conn)
       } catch (e) {
         this.error = e?.message || 'could not connect wallet'
       } finally {
         this.connecting = false
       }
+    },
+    // After connecting, offer to back the connection up to Nostr so it can be
+    // restored on another device / after clearing storage.
+    offerBackup(connectionString) {
+      if (!canBackup(this.$store)) return
+      this.$q.dialog({
+        title: 'back up to nostr?',
+        message:
+          'Encrypt this wallet connection to your Nostr key and store it on your relays, so you can restore it later without the connection string.',
+        cancel: { label: 'not now', flat: true },
+        ok: { label: 'back up', color: 'primary' },
+        persistent: false,
+      }).onOk(async () => {
+        try {
+          await backupNwcToNostr(this.$store, connectionString)
+          Notify.create({ message: 'wallet backed up to nostr ✓' })
+        } catch (e) {
+          Notify.create({ message: `backup failed: ${e?.message || e}`, color: 'negative' })
+        }
+      })
     },
     connectWebln() {
       this.error = ''
