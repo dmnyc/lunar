@@ -149,6 +149,13 @@ export default defineComponent({
       // (The visible feed itself stays unbounded for endless scroll — its DOM is
       // bounded by q-virtual-scroll, which only mounts the visible slice.)
       maxUnreadLength: 200,
+      // q-virtual-scroll bounds the DOM, but the underlying feed array (reactive
+      // event proxies + parsed content + image decodes) still grows as you load
+      // more. Desktop has the headroom; mobile Safari/Chrome have a tight per-tab
+      // memory ceiling and OOM-crash ("a problem repeatedly occurred"). On mobile
+      // we cap the array so endless scroll stops growing it; set in mounted() once
+      // $q.platform is available.
+      maxFeedLength: Infinity,
       since: Math.round(Date.now() / 1000),
       until: Math.round(Date.now() / 1000),
       // profilesUsed: new Set(),
@@ -177,6 +184,9 @@ export default defineComponent({
     if (this.$store.state.follows.length === 0) {
       this.feedName = 'global'
     }
+    // Bound the in-memory feed on mobile to avoid OOM tab crashes; desktop keeps
+    // unbounded endless scroll.
+    if (this.$q.platform.is.mobile) this.maxFeedLength = 250
     this.loadMore()
 
     // this.refreshInterval = setInterval(async () => {
@@ -199,6 +209,12 @@ export default defineComponent({
 
   methods: {
     async loadMore() {
+      // Stop growing the feed once it hits the (mobile) cap — endless scroll would
+      // otherwise keep appending older threads and eventually crash the tab.
+      if (this.feed.length >= this.maxFeedLength) {
+        this.loadingMore = false
+        return
+      }
       this.loadingMore = true
       let relays = Object.keys(this.$store.state.relays).length ? Object.keys(this.$store.state.relays) : Object.keys(this.$store.state.defaultRelays)
 
@@ -262,6 +278,9 @@ export default defineComponent({
       this.loadingUnread = true
       setTimeout(() => {
         this.feed = this.unreadFeed.concat(this.feed)
+        // Newest are now at the top; drop the oldest off the bottom to stay within
+        // the cap (the user is viewing the top after loading unread).
+        if (this.feed.length > this.maxFeedLength) this.feed = this.feed.slice(0, this.maxFeedLength)
         this.unreadFeed = []
         this.lastLoaded = Math.round(Date.now() / 1000)
         this.loadingUnread = false
