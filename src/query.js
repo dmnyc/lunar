@@ -39,7 +39,7 @@ function relaySet(relays) {
 // (notably tag filters like #p) when a relay never sends EOSE, which left pages
 // like Notifications blank. Driving the subscription ourselves guarantees the
 // promise always settles with whatever arrived.
-function collect(filter, relays, { timeout = 4000 } = {}) {
+function collect(filter, relays, { timeout = 4000, cacheUsage = NDKSubscriptionCacheUsage.CACHE_FIRST } = {}) {
   return new Promise((resolve) => {
     const events = new Map()
     let settled = false
@@ -56,7 +56,7 @@ function collect(filter, relays, { timeout = 4000 } = {}) {
     }
     const sub = ndk.subscribe(
       filter,
-      { closeOnEose: true, groupable: false, cacheUsage: NDKSubscriptionCacheUsage.CACHE_FIRST },
+      { closeOnEose: true, groupable: false, cacheUsage },
       relaySet(relays)
     )
     sub.on('event', (event) => {
@@ -69,18 +69,23 @@ function collect(filter, relays, { timeout = 4000 } = {}) {
 }
 
 // One-shot fetch → array of plain events.
-async function fetchMany(filter, relays) {
+async function fetchMany(filter, relays, opts) {
   await connect()
-  return collect(filter, relays)
+  return collect(filter, relays, opts)
 }
 
 // One-shot fetch → single (newest) plain event or null.
-async function fetchOne(filter, relays) {
+async function fetchOne(filter, relays, opts) {
   await connect()
-  const events = await collect(filter, relays)
+  const events = await collect(filter, relays, opts)
   if (!events.length) return null
   return events.reduce((newest, e) => (e.created_at > newest.created_at ? e : newest))
 }
+
+// Profile/relay-list reads must reflect the newest event, not a stale cached
+// one. PARALLEL queries cache AND relays together so a newer kind-0 / kind-10002
+// on a relay wins over an old copy sitting in the Dexie cache.
+const FRESH = { cacheUsage: NDKSubscriptionCacheUsage.PARALLEL }
 
 // Generic live subscription that matches the old stream() contract. filterFn
 // maps a settings object to { filter, relays }.
@@ -161,7 +166,7 @@ export async function getProfiles(settings = {}) {
   const { authors, relays } = settings
   const filter = { kinds: [0] }
   if (authors?.length) filter.authors = authors
-  return fetchMany(filter, relays)
+  return fetchMany(filter, relays, FRESH)
 }
 
 export async function getEvents(settings = {}) {
@@ -254,11 +259,16 @@ export async function dbEvent(id) {
 }
 
 export async function dbProfile(pubkey) {
-  return fetchOne({ kinds: [0], authors: [pubkey] })
+  return fetchOne({ kinds: [0], authors: [pubkey] }, undefined, FRESH)
 }
 
 export async function dbFollows(pubkey) {
   return fetchMany({ kinds: [3], authors: [pubkey], limit: 1 })
+}
+
+// NIP-65 relay list (kind 10002) — newest wins.
+export async function dbRelayList(pubkey) {
+  return fetchOne({ kinds: [10002], authors: [pubkey] }, undefined, FRESH)
 }
 
 export async function dbChats(pubkey) {

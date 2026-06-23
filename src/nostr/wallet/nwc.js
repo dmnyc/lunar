@@ -294,6 +294,24 @@ export async function getNwcInfo() {
   return { alias: result.alias, methods: result.methods || [] }
 }
 
+export async function listNwcTransactions(options = {}) {
+  if (!isNwcConnected()) throw new Error('NWC not connected')
+  const params = {}
+  if (options.limit) params.limit = options.limit
+  if (options.from) params.from = options.from
+  if (options.until) params.until = options.until
+  const result = await executeNip47Request('list_transactions', params)
+  return (result.transactions || []).map((tx) => ({
+    type: tx.type, // 'incoming' | 'outgoing'
+    description: tx.description,
+    amount: Math.floor((tx.amount || 0) / 1000), // msats → sats
+    feesPaid: Math.floor((tx.fees_paid || 0) / 1000),
+    createdAt: tx.created_at,
+    settledAt: tx.settled_at,
+    paymentHash: tx.payment_hash
+  }))
+}
+
 export function getNwcDisplayName(connectionUrl) {
   const parsed = parseNwcUrl(connectionUrl)
   if (!parsed) return 'NWC Wallet'

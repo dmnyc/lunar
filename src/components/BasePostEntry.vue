@@ -94,8 +94,42 @@
         </ul>
       </div>
     </div>
+
+    <!-- live preview of the draft -->
+    <div v-if='showPreview && text' class='post-preview q-pa-sm q-mb-sm'>
+      <div class='text-secondary q-mb-xs' style='font-size: .75rem;'>preview</div>
+      <BaseMarkdown :content='previewContent'/>
+    </div>
+
+    <!-- send countdown (undo window) -->
+    <div v-if='countdown.active' class='flex row items-center justify-between q-pa-sm q-mb-sm post-countdown'>
+      <span>posting in {{ countdown.remaining }}s…</span>
+      <div class='flex row' style='gap: .4rem;'>
+        <q-btn size='sm' flat dense label='cancel' color='negative' @click.stop='cancelCountdown'/>
+        <q-btn size='sm' unelevated dense label='post now' color='primary' @click.stop='postNow'/>
+      </div>
+    </div>
     <div class='flex justify-between' :class='toolSelected ? "column" : "row"' @click.stop>
-      <div class='flex row justify-between'>
+      <div class='flex row justify-between items-center'>
+        <input
+          ref='imageInput'
+          type='file'
+          accept='image/*'
+          style='display: none;'
+          @change='onImageSelected'
+        />
+        <q-btn
+          v-show='replyMode !== "repost"'
+          unelevated
+          class='no-padding button-image'
+          dense
+          size='sm'
+          :loading='uploadingImage'
+          @click.stop='pickImage'
+        >
+          <q-icon name='image' size='sm'/>
+          <q-tooltip>upload image</q-tooltip>
+        </q-btn>
         <q-btn-toggle
           v-show='replyMode !== "repost"'
           v-model='toolSelected'
@@ -282,12 +316,23 @@
           </template>
         </q-btn-toggle>
         <q-btn
+          v-if='!messageMode'
+          flat
+          unelevated
+          dense
+          :color="showPreview ? 'accent' : 'primary'"
+          @click.stop='showPreview = !showPreview'
+        >
+          <q-icon :name="showPreview ? 'visibility_off' : 'visibility'" size='sm'/>
+          <q-tooltip>{{ showPreview ? 'hide preview' : 'preview' }}</q-tooltip>
+        </q-btn>
+        <q-btn
           flat
           unelevated
           color="primary"
           type="submit"
-          @click.stop='send'
-          :disable='!textValid()'
+          @click.stop='handleSendClick'
+          :disable='!textValid() || countdown.active'
         >
           <q-icon name="send" :style='"transform: translateX(" + sendIconTranslation + "px);"'/>
         </q-btn>
@@ -305,8 +350,14 @@ import {cleanEvent} from '../utils/event'
 import BaseEmojiPicker from 'components/BaseEmojiPicker.vue'
 import BaseLinkForm from 'components/BaseLinkForm.vue'
 import BaseMessage from 'components/BaseMessage.vue'
+import BaseMarkdown from 'components/BaseMarkdown.vue'
 import {publish} from '../query'
+import {uploadImage} from '../nostr/mediaUpload'
+import {Notify} from 'quasar'
 // import { ref } from 'vue'
+
+const DRAFT_KEY = 'astral_post_draft'
+const COUNTDOWN_KEY = 'astral_post_countdown'
 
 export default {
   name: 'BasePostEntry',
@@ -316,6 +367,7 @@ export default {
     BaseEmojiPicker,
     BaseLinkForm,
     BaseMessage,
+    BaseMarkdown,
   },
 
   props: {
@@ -360,7 +412,11 @@ export default {
       textareaRange: null,
       // shortLong: 'short',
       longForm: false,
-      replyUserTags: [] // tags from previous reply authors
+      replyUserTags: [], // tags from previous reply authors
+      uploadingImage: false,
+      showPreview: false,
+      draftTimer: null,
+      countdown: { active: false, remaining: 0, raf: null },
     }
   },
 
@@ -458,12 +514,20 @@ export default {
     hexPubkey() {
       if (this.$route.params.pubkey) return this.bech32ToHex(this.$route.params.pubkey)
       return ''
-    }
+    },
+    previewContent() {
+      let text = this.text || ''
+      for (const link of this.links) {
+        text += link.name ? `\n[${link.name}](${link.url})` : `\n${link.url}`
+      }
+      return this.interpolateMentions(text, [], this.$store).text
+    },
   },
 
   mounted() {
     if (!this.messageMode) this.profileMentionsProvider.attach(this.textarea)
     if (this.replyMode) this.replyUserTags = this.getReplyUserTags()
+    this.restoreDraft()
     if (this.autoFocus) this.focusInput()
     this.$emit('resized')
   },
@@ -474,6 +538,7 @@ export default {
 
   beforeUnmount() {
     if (!this.messageMode) this.profileMentionsProvider.detach(this.textarea)
+    this.cancelCountdown()
     this.reset()
     this.$emit('resized')
   },
@@ -488,6 +553,7 @@ export default {
       this.textareaRange = this.caretRange || this.textareaRange
       this.updateReadonlyInput()
       if (!this.messageMode) this.updateReadonlyHightlightInput()
+      this.saveDraft()
     },
 
     async send() {
@@ -857,7 +923,105 @@ export default {
       this.readonlyHighlightTextarea.innerHTML = ''
       this.tags = []
       this.links = []
+      this.showPreview = false
+      this.clearDraft()
       this.focusInput()
+    },
+
+    // ── image upload ────────────────────────────────────────────────────
+    pickImage() {
+      this.$refs.imageInput.click()
+    },
+    async onImageSelected(e) {
+      const file = e.target.files && e.target.files[0]
+      e.target.value = '' // allow re-selecting the same file
+      if (!file) return
+      this.uploadingImage = true
+      try {
+        const url = await uploadImage(this.$store, file)
+        this.appendToEditor(url)
+      } catch (err) {
+        Notify.create({ message: `image upload failed: ${err?.message || err}`, color: 'negative' })
+      } finally {
+        this.uploadingImage = false
+      }
+    },
+    appendToEditor(str) {
+      const prefix = this.text && !this.text.endsWith('\n') ? '\n' : ''
+      this.textarea.appendChild(document.createTextNode(prefix + str))
+      this.updateText()
+      this.focusInput()
+    },
+
+    // ── drafts (localStorage) ───────────────────────────────────────────
+    // Only the main compose box persists a draft; replies/DMs are transient.
+    isMainCompose() {
+      return !this.messageMode && !this.replyMode
+    },
+    saveDraft() {
+      if (!this.isMainCompose()) return
+      clearTimeout(this.draftTimer)
+      this.draftTimer = setTimeout(() => {
+        try {
+          if (this.text && this.text.trim()) localStorage.setItem(DRAFT_KEY, this.textarea.innerText)
+          else localStorage.removeItem(DRAFT_KEY)
+        } catch (_) { /* storage unavailable */ }
+      }, 400)
+    },
+    restoreDraft() {
+      if (!this.isMainCompose()) return
+      try {
+        const draft = localStorage.getItem(DRAFT_KEY)
+        if (draft) {
+          this.textarea.innerText = draft
+          this.updateText()
+        }
+      } catch (_) { /* storage unavailable */ }
+    },
+    clearDraft() {
+      try { localStorage.removeItem(DRAFT_KEY) } catch (_) { /* storage unavailable */ }
+    },
+
+    // ── send countdown (undo window) ────────────────────────────────────
+    countdownSettings() {
+      try {
+        return JSON.parse(localStorage.getItem(COUNTDOWN_KEY)) || { enabled: true, secs: 5 }
+      } catch (_) {
+        return { enabled: true, secs: 5 }
+      }
+    },
+    handleSendClick() {
+      if (!this.textValid() || this.countdown.active) return
+      const s = this.countdownSettings()
+      // chat messages always send immediately; posts/replies honor the timer
+      if (!this.messageMode && s.enabled && s.secs > 0) this.startCountdown(s.secs)
+      else this.send()
+    },
+    startCountdown(secs) {
+      this.countdown.active = true
+      this.countdown.remaining = secs
+      const started = Date.now()
+      const tick = () => {
+        const remaining = Math.max(0, secs - (Date.now() - started) / 1000)
+        this.countdown.remaining = Math.ceil(remaining)
+        if (remaining <= 0) {
+          this.countdown.active = false
+          this.countdown.raf = null
+          this.send()
+          return
+        }
+        this.countdown.raf = requestAnimationFrame(tick)
+      }
+      this.countdown.raf = requestAnimationFrame(tick)
+    },
+    cancelCountdown() {
+      if (this.countdown.raf !== null) cancelAnimationFrame(this.countdown.raf)
+      this.countdown.raf = null
+      this.countdown.active = false
+    },
+    postNow() {
+      this.cancelCountdown()
+      this.send()
     },
 
     appendHashtags(tags) {
@@ -1074,6 +1238,14 @@ export default {
 ul, li {
   padding: 0;
   margin: 0;
+}
+.post-preview {
+  border: 1px solid var(--q-accent);
+  border-radius: .4rem;
+}
+.post-countdown {
+  border: 1px solid var(--q-primary);
+  border-radius: .4rem;
 }
 .post-entry-form {
   overflow: visible;

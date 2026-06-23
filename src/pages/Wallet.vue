@@ -2,7 +2,8 @@
   <q-page>
     <BaseHeader>wallet</BaseHeader>
 
-    <div class='section'>
+    <div class='section flex column' style='gap: 1rem;'>
+      <BaseWalletCard/>
       <BaseWalletConnect/>
     </div>
 
@@ -69,6 +70,7 @@
 import helpersMixin from '../utils/mixin'
 import { createMetaMixin } from 'quasar'
 import BaseWalletConnect from 'components/BaseWalletConnect.vue'
+import BaseWalletCard from 'components/BaseWalletCard.vue'
 
 const metaData = {
   title: 'astral - wallet',
@@ -82,7 +84,7 @@ const metaData = {
 export default {
   name: 'Wallet',
   mixins: [helpersMixin, createMetaMixin(metaData)],
-  components: { BaseWalletConnect },
+  components: { BaseWalletConnect, BaseWalletCard },
 
   data() {
     return {

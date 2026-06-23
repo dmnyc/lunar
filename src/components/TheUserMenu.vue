@@ -133,6 +133,9 @@
           :class='compactMode ? "" : "q-px-sm"'
         />
       </div>
+      <div v-if='!compactMode && $store.state.keys.pub' class='q-my-sm gt-sm'>
+        <BaseWalletCard compact/>
+      </div>
     <!-- <q-dialog
       v-model='post'
       seamless
@@ -159,6 +162,7 @@ import helpersMixin from '../utils/mixin'
 import BaseUserCard from 'components/BaseUserCard.vue'
 import BaseButtonPost from 'components/BaseButtonPost.vue'
 import BaseButtonSetUser from 'components/BaseButtonSetUser.vue'
+import BaseWalletCard from 'components/BaseWalletCard.vue'
 
 export default defineComponent({
   name: 'TheUserMenu',
@@ -235,6 +239,7 @@ export default defineComponent({
     BaseUserCard,
     BaseButtonPost,
     BaseButtonSetUser,
+    BaseWalletCard,
   },
 
   computed: {

@@ -1,51 +1,25 @@
 <template>
   <div class='full-width flex column' style='gap: .6rem;'>
-    <div class="text-bold flex justify-between no-wrap items-center" style='font-size: 1.1rem;'>
-      <span>wallet</span>
-      <q-btn
-        v-if='wallet.connected'
-        flat
-        dense
-        size='sm'
-        :icon='wallet.balanceVisible ? "visibility" : "visibility_off"'
-        @click='toggleBalance'
-      >
-        <q-tooltip>show/hide balance</q-tooltip>
-      </q-btn>
-    </div>
-
-    <!-- connected wallets -->
+    <!-- connected wallet: name + disconnect (with confirmation) -->
     <div v-if='wallet.wallets.length' class='flex column' style='gap: .4rem;'>
       <div
         v-for='w in wallet.wallets'
         :key='w.id'
-        class='flex row no-wrap items-center justify-between q-pa-sm wallet-row'
-        :class='{ "wallet-row--active": w.active }'
+        class='flex row no-wrap items-center justify-between q-pa-sm wallet-row wallet-row--active'
       >
         <div class='flex row no-wrap items-center' style='gap: .5rem; overflow: hidden;'>
-          <q-icon :name='kindIcon(w.kind)' size='sm' :color='w.active ? "positive" : "secondary"'/>
+          <q-icon :name='kindIcon(w.kind)' size='sm' color='positive'/>
           <div class='flex column' style='overflow: hidden;'>
             <span class='ellipsis' style='max-width: 16rem;'>{{ w.name }}</span>
             <span class='text-secondary' style='font-size: .75rem;'>{{ kindName(w.kind) }}</span>
           </div>
         </div>
-        <div class='flex row no-wrap items-center' style='gap: .2rem;'>
-          <q-btn v-if='!w.active' size='sm' flat dense label='use' @click='wallet.setActiveWallet(w.id)'/>
-          <span v-else-if='wallet.balanceVisible && wallet.balance != null' class='q-px-xs' style='font-size: .9rem;'>
-            {{ wallet.balance.toLocaleString() }} sats
-          </span>
-          <q-btn size='sm' flat dense round icon='close' color='negative' @click='wallet.removeWallet(w.id)'>
-            <q-tooltip>remove</q-tooltip>
-          </q-btn>
-        </div>
-      </div>
-      <div class='flex row' style='gap: .4rem;'>
-        <q-btn size='sm' outline color='primary' icon='refresh' label='refresh balance' :loading='wallet.loading' @click='refresh'/>
+        <q-btn size='sm' outline dense color='negative' label='disconnect' @click='confirmDisconnect(w)'/>
       </div>
     </div>
 
-    <!-- connect new wallet -->
-    <div class='flex column' style='gap: .4rem;'>
+    <!-- connect a wallet (hidden once one is connected) -->
+    <div v-else class='flex column' style='gap: .4rem;'>
       <div class='flex row no-wrap items-center' style='gap: .3rem;'>
         <q-input
           v-model='nwcString'
@@ -88,11 +62,20 @@ export default defineComponent({
     }
   },
 
-  mounted() {
-    if (this.wallet.connected) this.refresh()
-  },
-
   methods: {
+    confirmDisconnect(w) {
+      this.$q.dialog({
+        title: 'disconnect wallet',
+        message: `disconnect "${w.name}"? you can reconnect anytime with your connection string.`,
+        cancel: true,
+        persistent: true,
+        ok: { label: 'disconnect', color: 'negative', flat: true },
+        cancel: { label: 'cancel', flat: true },
+      }).onOk(() => {
+        this.wallet.removeWallet(w.id)
+        Notify.create({ message: 'wallet disconnected' })
+      })
+    },
     kindName(kind) {
       if (kind === WALLET_WEBLN) return 'browser extension'
       if (kind === WALLET_NWC) return 'Nostr Wallet Connect'
@@ -112,7 +95,7 @@ export default defineComponent({
         await this.wallet.connectNwcWallet(this.nwcString.trim())
         this.nwcString = ''
         Notify.create({ message: 'wallet connected ⚡' })
-        this.refresh()
+        this.wallet.refreshBalance()
       } catch (e) {
         this.error = e?.message || 'could not connect wallet'
       } finally {
@@ -124,16 +107,10 @@ export default defineComponent({
       try {
         this.wallet.connectWeblnWallet()
         Notify.create({ message: 'browser wallet connected ⚡' })
-        this.refresh()
+        this.wallet.refreshBalance()
       } catch (e) {
         this.error = e?.message || 'could not connect browser wallet'
       }
-    },
-    refresh() {
-      this.wallet.refreshBalance()
-    },
-    toggleBalance() {
-      this.wallet.toggleBalanceVisible()
     },
   },
 })

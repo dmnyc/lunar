@@ -60,6 +60,19 @@ export function connect() {
   return connectPromise
 }
 
+// Add relays to the live pool (e.g. the user's NIP-65 set) so subsequent
+// subscriptions and publishes can use them.
+export function addRelays(urls = []) {
+  for (const url of urls) {
+    if (!/^wss?:\/\//.test(url)) continue
+    try {
+      ndk.addExplicitRelay(url)
+    } catch (err) {
+      console.warn('[ndk] could not add relay', url, err)
+    }
+  }
+}
+
 // Build an NDKRelaySet from explicit URLs (used when callers pass a relays list,
 // mirroring the old worker API), falling back to the pool's default set.
 export function relaySetFrom(urls) {

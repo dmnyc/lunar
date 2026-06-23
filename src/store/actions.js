@@ -7,11 +7,13 @@ import {
   getEvents,
   dbEvent,
   dbFollows,
+  dbRelayList,
   streamMainProfilesFollows,
   dbQuery,
   dbSave,
   publish,
 } from '../query'
+import {addRelays} from '../nostr/ndk'
 import {getPubKeyTagWithRelay} from '../utils/helpers'
 import {metadataFromEvent} from '../utils/event'
 import * as helpersMixin from '../utils/mixin'
@@ -27,8 +29,37 @@ export function initKeys(store, keys) {
 export async function launch(store) {
   console.log('launch for ', store.state.keys.pub)
 
+  // adopt the user's NIP-65 relays first, then start subscriptions on them
+  await store.dispatch('loadRelayList')
+
   // start listening for nostr events
   store.dispatch('restartMainSubscription')
+}
+
+// Fetch the user's NIP-65 (kind 10002) relay list and adopt it as the active
+// relay set. Modern clients publish relays here rather than in kind-3 content.
+export async function loadRelayList(store) {
+  if (!store.state.keys.pub) return
+  try {
+    const event = await dbRelayList(store.state.keys.pub)
+    if (!event || !event.tags) return
+
+    const relays = {}
+    for (const [t, url, marker] of event.tags) {
+      if (t !== 'r' || !url) continue
+      // No marker → both read and write (per NIP-65).
+      relays[url] = {
+        read: marker !== 'write',
+        write: marker !== 'read'
+      }
+    }
+    if (Object.keys(relays).length) {
+      store.commit('setRelays', relays)
+      addRelays(Object.keys(relays))
+    }
+  } catch (err) {
+    console.warn('[loadRelayList] failed', err)
+  }
 }
 
 let mainSub = {}

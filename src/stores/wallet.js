@@ -16,6 +16,8 @@ import {
   createWeblnInvoice,
   getWeblnBalance
 } from '../nostr/wallet/webln'
+import { listNwcTransactions } from '../nostr/wallet/nwc'
+import { fetchLnurlInvoice } from '../nostr/zap'
 
 // Wallet kinds (matches the zapcooking/sparkihonne convention)
 export const WALLET_WEBLN = 1
@@ -30,6 +32,8 @@ export const useWalletStore = defineStore('wallet', {
     balance: null, // sats
     loading: false,
     lastSync: null,
+    transactions: [],
+    txLoading: false,
     balanceVisible: LocalStorage.getItem('astral_balance_visible') !== false
   }),
 
@@ -123,6 +127,38 @@ export const useWalletStore = defineStore('wallet', {
       if (w.kind === WALLET_NWC) return createNwcInvoice(amountSats, description)
       if (w.kind === WALLET_WEBLN) return createWeblnInvoice(amountSats, description)
       throw new Error('Unsupported wallet')
+    },
+
+    // Pay either a bolt11 invoice or a lightning address / LNURL (with amount).
+    async pay(input, amountSats) {
+      const s = (input || '').trim()
+      if (!s) throw new Error('nothing to pay')
+      let invoice = s
+      if (!s.toLowerCase().startsWith('lnbc')) {
+        invoice = await fetchLnurlInvoice(s, amountSats)
+      }
+      const result = await this.payInvoice(invoice)
+      this.refreshBalance()
+      return result
+    },
+
+    async loadTransactions(limit = 20) {
+      const w = this.activeWallet
+      if (!w || w.kind !== WALLET_NWC) {
+        this.transactions = []
+        return []
+      }
+      this.txLoading = true
+      try {
+        await this.ensureActiveConnected()
+        this.transactions = await listNwcTransactions({ limit })
+        return this.transactions
+      } catch (e) {
+        console.error('[wallet] loadTransactions failed', e)
+        return []
+      } finally {
+        this.txLoading = false
+      }
     },
 
     async refreshBalance() {

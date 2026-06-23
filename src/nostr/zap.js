@@ -11,8 +11,15 @@ import { bech32 } from '@scure/base'
 import { signAsynchronously } from '../utils/event'
 
 function lnurlToUrl(lnurl) {
-  if (/^https?:\/\//i.test(lnurl)) return lnurl
-  const { words } = bech32.decode(lnurl, 2000)
+  const s = lnurl.trim()
+  if (/^https?:\/\//i.test(s)) return s
+  // Lightning address: name@domain → LNURL-pay well-known endpoint
+  if (/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s)) {
+    const [name, domain] = s.split('@')
+    return `https://${domain}/.well-known/lnurlp/${name}`
+  }
+  // lnurl bech32
+  const { words } = bech32.decode(s, 2000)
   const bytes = bech32.fromWords(words)
   return new TextDecoder().decode(Uint8Array.from(bytes))
 }
@@ -24,6 +31,28 @@ async function fetchLnurlPayMetadata(lnString) {
   if (data.status === 'ERROR') throw new Error(data.reason || 'lightning endpoint error')
   if (!data.callback) throw new Error('lightning endpoint missing callback')
   return data // { callback, minSendable, maxSendable, allowsNostr, nostrPubkey, commentAllowed }
+}
+
+// Resolve a lightning address / LNURL into a plain bolt11 invoice (no zap
+// request) — used by the wallet "send" flow.
+export async function fetchLnurlInvoice(lnStringOrAddress, amountSats, comment = '') {
+  if (!amountSats || amountSats <= 0) throw new Error('amount required')
+  const meta = await fetchLnurlPayMetadata(lnStringOrAddress)
+  const amountMsats = amountSats * 1000
+  if (meta.minSendable && amountMsats < meta.minSendable) {
+    throw new Error(`minimum is ${Math.ceil(meta.minSendable / 1000)} sats`)
+  }
+  if (meta.maxSendable && amountMsats > meta.maxSendable) {
+    throw new Error(`maximum is ${Math.floor(meta.maxSendable / 1000)} sats`)
+  }
+  let url = `${meta.callback}${meta.callback.includes('?') ? '&' : '?'}amount=${amountMsats}`
+  if (comment && meta.commentAllowed) url += `&comment=${encodeURIComponent(comment.slice(0, meta.commentAllowed))}`
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`could not fetch invoice (${res.status})`)
+  const data = await res.json()
+  if (data.status === 'ERROR') throw new Error(data.reason || 'invoice error')
+  if (!data.pr) throw new Error('no invoice returned')
+  return data.pr
 }
 
 // Build and sign a NIP-57 kind-9734 zap request.
