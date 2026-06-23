@@ -187,22 +187,28 @@
           <div class="text-lg text-bold tracking-wide leading-relaxed py-2">
             Your keys <q-icon name="vpn_key" />
           </div>
-          <p v-if="$store.state.keys.priv">Make sure you back up your private key!</p>
-          <p v-else>Your private key is not here!</p>
+          <template v-if="authMethod === 'privateKey'">
+            <p class='text-warning'>Make sure you back up your private key! Anyone with it controls your account.</p>
+          </template>
+          <template v-else-if="authMethod === 'nip07'">
+            <p>You're signed in with a <strong>browser extension</strong>. Your private key stays in the extension — Lunar never sees it. This is the secure setup, so there's nothing to back up here.</p>
+          </template>
+          <template v-else-if="authMethod === 'nip46'">
+            <p>You're signed in with a <strong>remote signer</strong> (e.g. Amber). Your private key stays in your signer — Lunar never sees it. This is the secure setup, so there's nothing to back up here.</p>
+          </template>
+          <template v-else>
+            <p>You're signed in with a <strong>public key only</strong> (read-only). To publish, sign in with your private key, a browser extension, or a remote signer.</p>
+          </template>
           <div class="mt-1 text-xs">
-            Posts are published using your private key. Others can see your
-            posts or follow you using only your public key.
+            Others can see your posts or follow you using only your public key.
           </div>
         </q-card-section>
 
         <q-card-section>
-          <p>Private Key:</p>
-          <q-input
-            v-model="nsecKey"
-            class="mb-2"
-            readonly
-            filled
-          />
+          <template v-if="authMethod === 'privateKey'">
+            <p>Private Key:</p>
+            <q-input v-model="nsecKey" class="mb-2" readonly filled />
+          </template>
           <p>Public Key:</p>
           <q-input v-model="npubKey" readonly filled />
         </q-card-section>
@@ -228,6 +234,7 @@ import BaseInformation from 'components/BaseInformation.vue'
 import ThePreferences from 'components/ThePreferences.vue'
 import { createMetaMixin } from 'quasar'
 import { utils } from 'lnurl-pay'
+import { getAuthManager } from '../nostr/authManager'
 
 const metaData = {
   // sets document title
@@ -298,6 +305,11 @@ export default {
     nsecKey() {
       if (this.$store.state.keys.priv) return this.hexToBech32(this.$store.state.keys.priv, 'nsec')
       return null
+    },
+    // How the user signed in — drives the "Your keys" copy.
+    authMethod() {
+      if (this.$store.state.keys.priv) return 'privateKey'
+      return getAuthManager()?.getState?.()?.authMethod || 'watch'
     },
     hasLnAddr() {
       return utils.isLightningAddress(this.metadata.lud06) || (utils.isLnurl(this.metadata.lud06) && this.lnurlToLnAddr(this.metadata.lud06))
