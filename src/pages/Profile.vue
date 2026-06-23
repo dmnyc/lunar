@@ -66,30 +66,40 @@
       </q-tab-panel>
 
       <q-tab-panel name="follows" class='no-padding'>
-        <div v-if="!follows">{{ $t('noFollows') }}</div>
+        <div v-if="!follows.length">{{ $t('noFollows') }}</div>
         <div v-else class="flex column relative">
           <div class='q-pl-sm'>
             <BaseUserCard
-              v-for="(pubkey) in follows"
+              v-for="(pubkey) in visibleFollows"
               :key="pubkey"
               :pubkey="pubkey"
               :show-following='true'
             />
           </div>
+          <BaseButtonLoadMore
+            v-if='follows.length > visibleFollows.length'
+            :loading-more='false'
+            @click='loadMoreFollows'
+          />
         </div>
       </q-tab-panel>
 
       <q-tab-panel name="followers" class='no-padding'>
-        <div v-if="!followers">{{ $t('noFollowers') }}</div>
+        <div v-if="!followerKeys.length">{{ $t('noFollowers') }}</div>
         <div v-else class="flex column relative">
           <div class='q-pl-sm'>
             <BaseUserCard
-              v-for="(pubkey) in Object.keys(followers)"
+              v-for="(pubkey) in visibleFollowers"
               :key="pubkey"
               :pubkey="pubkey"
               :show-following='true'
             />
           </div>
+          <BaseButtonLoadMore
+            v-if='followerKeys.length > visibleFollowers.length'
+            :loading-more='false'
+            @click='loadMoreFollowers'
+          />
         </div>
       </q-tab-panel>
 
@@ -154,6 +164,12 @@ export default defineComponent({
       followsEvent: null,
       follows: [],
       followers: [],
+      // Render follows/followers a page at a time. Rendering the full list at
+      // once (and fetching every profile) freezes mobile clients for accounts
+      // that follow thousands of users, so we paginate with a "load more" button.
+      pageSize: 30,
+      followsShown: 30,
+      followersShown: 30,
       relays: {},
       profilesUsed: new Set(),
       loadingMore: true,
@@ -173,6 +189,26 @@ export default defineComponent({
     hexPubkey() {
       if (this.$route.params.pubkey) return this.bech32ToHex(this.$route.params.pubkey)
       return ''
+    },
+    visibleFollows() {
+      return this.follows.slice(0, this.followsShown)
+    },
+    followerKeys() {
+      return Object.keys(this.followers)
+    },
+    visibleFollowers() {
+      return this.followerKeys.slice(0, this.followersShown)
+    },
+  },
+
+  watch: {
+    // Only fetch profiles for the cards we actually render. useProfile dedupes
+    // via profilesUsed, so re-running as the visible slice grows is cheap.
+    visibleFollows(pubkeys) {
+      pubkeys.forEach(pubkey => this.useProfile(pubkey))
+    },
+    visibleFollowers(pubkeys) {
+      pubkeys.forEach(pubkey => this.useProfile(pubkey))
     },
   },
 
@@ -195,6 +231,8 @@ export default defineComponent({
     async start() {
       // this.useProfile(this.hexPubkey)
       this.loadingMore = true
+      this.followsShown = this.pageSize
+      this.followersShown = this.pageSize
       let relays = Object.keys(this.$store.state.relays).length ? Object.keys(this.$store.state.relays) : Object.keys(this.$store.state.defaultRelays)
 
       let profile = await dbProfile(this.hexPubkey)
@@ -224,14 +262,14 @@ export default defineComponent({
             .filter(([t, v]) => t === 'p' && v)
             .map(([_, v]) => v)
           this.relays = event.content.length ? JSON.parse(event.content) : []
-          if (this.follows.length)
-            this.follows.forEach(pubkey => this.useProfile(pubkey))
+          // Profiles for the visible page are fetched by the visibleFollows
+          // watcher; we no longer fetch every follow up front.
         }
       })
       this.sub.dbStreamFollowers = await dbStreamFollowers({author: this.hexPubkey, relays}, events => {
         for (let event of events) {
           this.followers[event.pubkey] = true
-          this.useProfile(event.pubkey)
+          // Profiles for the visible page are fetched by the visibleFollowers watcher.
         }
       })
     },
@@ -253,6 +291,14 @@ export default defineComponent({
         if (checkDups) this.eventsSet.add(event.id)
         addToThread(threads, event)
       }
+    },
+
+    loadMoreFollows() {
+      this.followsShown += this.pageSize
+    },
+
+    loadMoreFollowers() {
+      this.followersShown += this.pageSize
     },
 
     useProfile(pubkey) {
