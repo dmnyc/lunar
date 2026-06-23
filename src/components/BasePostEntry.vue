@@ -434,6 +434,7 @@ export default {
       replyUserTags: [], // tags from previous reply authors
       uploadingImage: false,
       showPreview: false,
+      serialized: '',
       draftTimer: null,
       countdown: { active: false, remaining: 0, raf: null },
     }
@@ -535,7 +536,9 @@ export default {
       return ''
     },
     previewContent() {
-      let text = this.text || ''
+      // serialized preserves line breaks (textContent drops them) so the
+      // preview matches what gets published
+      let text = this.serialized || ''
       for (const link of this.links) {
         text += link.name ? `\n[${link.name}](${link.url})` : `\n${link.url}`
       }
@@ -574,6 +577,7 @@ export default {
       // else this.text = this.textarea.textContent
       this.text = this.textarea.textContent
       this.innertext = this.textarea.innerText
+      this.serialized = this.contentToText(this.textarea)
       this.textareaRange = this.caretRange || this.textareaRange
       this.updateReadonlyInput()
       if (!this.messageMode) this.updateReadonlyHightlightInput()
