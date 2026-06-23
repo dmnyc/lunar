@@ -44,57 +44,6 @@
             </li>
           </template>
         </BaseSelect>
-        <div class="text-bold flex justify-between no-wrap" style='font-size: 1rem;'>
-          {{ $t('lightningTips') }}
-        </div>
-        <div class='flex column q-px-sm' style='gap: .3rem;'>
-          <div>
-          off
-          <q-toggle v-model='preferences.lightningTips.enabled' :disable="!editingPreferences" color='accent' size='sm'/>
-          on
-          </div>
-          <span style='white-space: nowrap;'><strong>tip presets</strong></span>
-          <div v-if='preferences.lightningTips.enabled' class='flex row no-wrap items-center' style='gap: 2rem;'>
-            <q-input
-              v-for='(preset, index) in preferences.lightningTips.presets'
-              :key='index'
-              v-model='preferences.lightningTips.presets[index]'
-              type='number'
-              :label='"preset " + (index + 1)'
-              :disable="!editingPreferences"
-              dense
-              filled
-              suffix='sats'
-              />
-          </div>
-          <div v-if='hasWebLn'>
-            <span style='white-space: nowrap;'><strong>one click tip</strong></span>
-            <div style='font-size: .9rem;'>note: you will need a webln enabled wallet like Alby to use this feature, and
-            setting a budget in your webln wallet for astral will give you a true one click experience.
-            this will authorize a tip of a set default amount to the author of a note with one click of the
-            <q-icon name='bolt' style='font-size: 1.2rem;'/> lightning tip button. the
-            <q-icon name='arrow_drop_down' style='font-size: 1.2rem;'/> drop down button to the left
-            will take you through the normal lightning tip pay flow.</div>
-            <div v-if='preferences.lightningTips.enabled' class='flex row no-wrap items-center' style='gap: 2rem;'>
-              <div>
-              off
-              <q-toggle v-model='preferences.lightningTips.oneClick.enabled' :disable="!editingPreferences" color='accent' size='sm'/>
-              on
-              </div>
-              <q-input
-                v-if='preferences.lightningTips.oneClick.enabled'
-                v-model='preferences.lightningTips.oneClick.amount'
-                type='number'
-                label='webln default tip amount'
-                :disable="!editingPreferences"
-                dense
-                filled
-                suffix='sats'
-                style='width: 10rem;'
-              />
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   </div>

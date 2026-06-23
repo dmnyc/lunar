@@ -209,6 +209,12 @@ export default defineComponent({
           match: 'messages',
         },
         {
+          title: 'wallet',
+          icon: 'account_balance_wallet',
+          to: '/wallet',
+          match: 'wallet',
+        },
+        {
           title: 'settings',
           icon: 'settings',
           to: '/settings',

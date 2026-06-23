@@ -36,6 +36,11 @@ const routes = [
         name: 'event',
       },
       {
+        path: '/wallet',
+        component: () => import('pages/Wallet.vue'),
+        name: 'wallet',
+      },
+      {
         path: '/notifications',
         component: () => import('pages/Notifications.vue'),
         name: 'notifications',

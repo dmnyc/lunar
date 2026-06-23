@@ -72,6 +72,7 @@ import helpersMixin from '../utils/mixin'
 import {Notify} from 'quasar'
 // import { requestInvoice } from 'lnurl-pay'
 import BaseSelect from 'components/BaseSelect.vue'
+import { useWalletStore } from 'stores/wallet'
 
 export default defineComponent({
   name: 'BaseWallet',
@@ -219,12 +220,27 @@ export default defineComponent({
       }
 
       this.loadingInvoice = true
-      const invoice = await this.getInvoice(this.lnString, this.tipAmount)
+      const invoice = await this.getInvoice(this.lnString, this.tipAmount, this.pubkey)
 
-      if (invoice.startsWith('lnurl')) {
+      if (!invoice || !invoice.toLowerCase().startsWith('lnbc')) {
         Notify.create({
-          message: `invoice couldn't be fetched for ${this.$store.getters.displayName(this.pubkey)}, please an different pay method`
+          message: `invoice couldn't be fetched for ${this.$store.getters.displayName(this.pubkey)}, please try a different pay method`,
+          color: 'negative'
         })
+        this.loadingInvoice = false
+        return
+      }
+
+      // If a wallet is connected (NWC/Spark/WebLN), pay it in-app rather than
+      // handing off to an external wallet URI.
+      const wallet = useWalletStore()
+      if (wallet.connected) {
+        try {
+          await wallet.payInvoice(invoice)
+          Notify.create({ message: `${this.tipAmount} sats zapped ⚡` })
+        } catch (e) {
+          Notify.create({ message: `payment unsuccessful: ${e?.message || e}`, color: 'negative' })
+        }
         this.loadingInvoice = false
         return
       }

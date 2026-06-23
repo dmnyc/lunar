@@ -10,7 +10,8 @@ import DOMPurify from 'dompurify'
 // import { utils } from 'lnurl-pay'
 import { Buffer } from 'buffer'
 import {Notify} from 'quasar'
-import { requestInvoice, utils } from 'lnurl-pay'
+import { utils } from 'lnurl-pay'
+import { fetchZapInvoice } from '../nostr/zap'
 const { formatDate } = date
 
 
@@ -426,46 +427,27 @@ export default {
         // console.log('lnAddrToLnurl error: ', error, ' for ', lnAddr)
       }
     },
-    async getInvoice(lnString, amount) {
-      if (lnString.toLowerCase().indexOf('lnbc') === 0) {
-        return lnString
-      }
-
-      if (!amount) {
-        return lnString
-      }
+    async getInvoice(lnString, amount, pubkey = null, eventId = null) {
+      // Already a bolt11 invoice — nothing to fetch.
+      if (lnString.toLowerCase().indexOf('lnbc') === 0) return lnString
+      if (!amount) return lnString
 
       try {
-        const { invoice } = await requestInvoice({
-          lnUrlOrAddress: lnString,
-          tokens: amount, // satoshis
-          fetchGet: (req) => {
-            let url = `https://proxy.astral.ninja/${req.url}`
-
-            if (req.params) {
-              if (url.includes('?')) url += '&'
-              else url += '?'
-              url += new URLSearchParams(req.params)
-            }
-
-            // console.log('getInvoice', req, url)
-            return fetch(url)
-              .then((res) => res.json())
-              .catch((err) => {
-                Notify.create({
-                  message: 'Error fetching invoice from LNURL. ' + err.toString()
-                })
-              })
-          }
+        // Zap-aware: attaches a signed NIP-57 zap request when the recipient's
+        // LNURL endpoint supports it, otherwise falls back to a plain tip.
+        return await fetchZapInvoice({
+          store: this.$store,
+          lnString,
+          recipientPubkey: pubkey,
+          amountSats: amount,
+          eventId
         })
-
-        return invoice
       } catch (e) {
         Notify.create({
-          message: 'Error fetching invoice from LNURL. ' + e.toString()
+          message: 'Error fetching invoice from LNURL. ' + e.toString(),
+          color: 'negative'
         })
-
-        return this.lnString
+        return lnString
       }
     }
   }
