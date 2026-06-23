@@ -74,6 +74,7 @@
         </div>
       </div>
       <div class='flex row no-wrap items-center post-info' style='z-index: 1;' @click.stop>
+        <q-item-label v-if='clientName' class='q-pr-sm gt-xs text-secondary ellipsis' style='opacity: .55; font-size: 75%; max-width: 8rem;'>via {{ clientName }}</q-item-label>
         <q-item-label class='q-pr-xs' style='opacity: .8; font-size: 90%;'>{{ niceDate(event.created_at) }}</q-item-label>
         <q-fab
           color='secondary'
@@ -331,6 +332,11 @@ export default defineComponent({
   },
 
   computed: {
+    // NIP-89 client tag: ["client", "<name>", ...] — shown as "via <name>"
+    clientName() {
+      const tag = (this.event.tags || []).find((t) => t[0] === 'client' && t[1])
+      return tag ? tag[1] : ''
+    },
     tagged() {
       let replyTags = this.event.interpolated?.replyEvents
       if (replyTags?.length) return replyTags[replyTags.length - 1]
