@@ -18,6 +18,7 @@
       <div
         v-for='(item, index) in items'
         :key='index'
+        class='feed-item'
       >
         <BasePostThread
           :events="item"
@@ -141,6 +142,11 @@ export default defineComponent({
       loadingUnread: false,
       // tab: 'follows',
       feedName: 'follows',
+      // The 10s refresh poll keeps appending to unreadFeed for as long as the
+      // page stays open; cap it so an idle-but-open feed can't leak unbounded.
+      // (The visible feed itself stays unbounded for endless scroll — off-screen
+      // render memory is bounded via content-visibility on the feed items.)
+      maxUnreadLength: 200,
       since: Math.round(Date.now() / 1000),
       until: Math.round(Date.now() / 1000),
       // profilesUsed: new Set(),
@@ -273,6 +279,8 @@ export default defineComponent({
       if (event.pubkey === this.$store.state.keys.pub) feed = activeFeed
       else feed = (event.created_at > this.lastLoaded) ? unreadFeed : activeFeed
       if (this.feedName === 'global' && (this.isBot(event) || this.isAI(event))) return
+      // Don't let the unread buffer grow without bound while the feed sits open.
+      if (feed === unreadFeed && unreadFeed.length >= this.maxUnreadLength) return
       addToThread(feed, JSON.parse(JSON.stringify(event)), 'feed', event.pubkey !== this.$store.state.keys.pub)
 
       // if (this.$store.state.follows.includes(event.pubkey)) addToThread(feed.follows, JSON.parse(JSON.stringify(event)), 'feed', event.pubkey !== this.$store.state.keys.pub)
@@ -332,5 +340,16 @@ export default defineComponent({
 
 .q-page::-webkit-scrollbar {
   width: 0px;
+}
+
+/* Keep endless scroll while bounding render memory: off-screen feed items skip
+   layout/paint and let the browser release their decoded-image memory, which is
+   the dominant cost in a long image-heavy feed. contain-intrinsic-size keeps the
+   scrollbar/geometry stable; the `auto` keyword remembers each item's real
+   height after it has been rendered once. (No-op on browsers without
+   content-visibility support — no regression there.) */
+.feed-item {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 300px;
 }
 </style>
