@@ -1,74 +1,81 @@
 <template>
   <div class='lightning-card'>
-    <div class='flex no-wrap justify-between'  :class='rowOrColumn' style='gap: 1rem;'>
-      <div style='font-size: .9rem;' :style='rowOrColumn === "row" ? "gap: .5rem;" : "gap: 1rem;"' class='flex column justify-between' :align='rowOrColumn === "row" ? "start" : "center"'>
-        <div v-if='pubkey' class='flex column items-center' >
-          <span class='text-bold' style='font-size: 1.1rem;'>lightning tip for</span>
-          <BaseUserCard :pubkey='pubkey' :action-buttons='false'/>
-        </div>
-        <div v-else class='text-bold' style='font-size: 1.1rem;'>lightning {{type}}</div>
-        <div v-if='bolt11' class='flex column' :class='rowOrColumn === "row" ? "items-start" : "items-center"'>
-          <div v-if='bolt11.description'><strong>desc:</strong> {{bolt11.description}}</div>
-          <div><strong>amount:</strong> {{bolt11.amount ? `${bolt11.amount} sats` : 'none specified'}}</div>
-          <div v-if='bolt11.created'><strong>created date:</strong> {{ dateUTC(bolt11.created) }}</div>
-          <div v-if='bolt11.created'><strong>created time:</strong> {{ timeUTC(bolt11.created) }}</div>
-          <div v-if='bolt11.expires'><strong>expires date:</strong> {{ dateUTC(bolt11.expires) }}</div>
-          <div v-if='bolt11.expires'><strong>expires time:</strong> {{ timeUTC(bolt11.expires) }}</div>
-          <div v-if='bolt11.error'><strong>error:</strong> {{bolt11.error}}</div>
-        </div>
-        <div v-else class='flex column' :class='rowOrColumn === "row" ? "items-start" : "items-center"'>
-          <div v-if='request.lnAddr' class='flex row items-center'>
-            <span>{{request.lnAddr}}</span>
-            <BaseButtonCopy :button-text='request.lnAddr' class='q-pr-xs' @click.stop/>
-          </div>
-        </div>
-          <div class='flex row no-wrap q-pt-xs' style='gap: .5rem;' :class='rowOrColumn === "row" ? " justify-start" : " justify-center"'>
-            <BaseButtonCopy :button-text='lnString' button-label='copy' outline class='q-pr-xs' @click.stop='updateMode("copy")'/>
-            <q-btn label='qr' icon='qr_code_2' outline size='sm' dense unelevated class='q-pr-xs' @click.stop='updateMode("qr")'/>
-            <q-btn label='wallet' icon='wallet' outline size='sm' dense unelevated class='q-pr-xs' @click.stop='updateMode("wallet")'/>
-          </div>
+    <div class='flex column items-center' style='gap: 1rem;'>
+      <div v-if='pubkey' class='flex column items-center'>
+        <span class='text-bold' style='font-size: 1.1rem;'>lightning tip for</span>
+        <BaseUserCard :pubkey='pubkey' :action-buttons='false'/>
       </div>
-      <q-tab-panels v-model="mode" style='background: unset;' :style='rowOrColumn === "row" ? "max-width: 50%; width: 50%" : "max-width: 100%; width: 100%"'>
-        <q-tab-panel name="copy" class='no-padding flex items-center' :class='rowOrColumn === "row" ? "justify-end" : "justify-center"'>
-          <div class='break-word-wrap' style='font-size: .7rem; overflow-y: auto; max-height: 170px; max-width: 200px'>{{ this.lnString.toLowerCase() }}</div>
-        </q-tab-panel>
-        <q-tab-panel name="qr" class='no-padding flex items-center justify-center'>
-          <BaseQr :code='this.lnString' style='height: fit-content;'/>
-        </q-tab-panel>
-        <q-tab-panel name="wallet" class='no-padding flex items-center justify-center full-width'>
-          <BaseWallet :ln-string='lnString' :pubkey='pubkey' :bolt11='bolt11'/>
-        </q-tab-panel>
-      </q-tab-panels>
+      <div v-else class='text-bold' style='font-size: 1.1rem;'>lightning {{ type }}</div>
+
+      <!-- fixed bolt11 invoice details -->
+      <div v-if='bolt11' class='flex column items-center' style='font-size: .9rem;'>
+        <div v-if='bolt11.description'><strong>desc:</strong> {{ bolt11.description }}</div>
+        <div><strong>amount:</strong> {{ bolt11.amount ? `${bolt11.amount} sats` : 'none specified' }}</div>
+        <div v-if='bolt11.error' class='text-negative'><strong>error:</strong> {{ bolt11.error }}</div>
+      </div>
+      <div v-else-if='request.lnAddr' class='text-secondary'>{{ request.lnAddr }}</div>
+
+      <!-- amount picker (lnurl tips) -->
+      <div v-if='type === "lnurl"' class='flex row items-center justify-center' style='gap: .4rem; flex-wrap: wrap;'>
+        <q-btn
+          v-for='amt in presets'
+          :key='amt'
+          :label='String(amt)'
+          size='sm'
+          :outline='amount !== amt'
+          color='primary'
+          :text-color='amount === amt ? "dark" : undefined'
+          @click.stop='amount = amt'
+        />
+        <q-input v-model.number='amount' type='number' dense outlined label='sats' style='max-width: 6rem;'/>
+      </div>
+
+      <!-- pay via Bitcoin Connect (WebLN / NWC / Alby, with its own QR) -->
+      <q-btn
+        :label='payLabel'
+        icon='bolt'
+        color='primary'
+        text-color='dark'
+        unelevated
+        :loading='paying'
+        :disable='type === "lnurl" && !amount'
+        @click.stop='pay'
+      />
+
+      <!-- raw lnurl/invoice QR for scanning with any wallet -->
+      <q-btn :label='showQr ? "hide QR" : "show QR"' icon='qr_code_2' flat dense size='sm' @click.stop='showQr = !showQr'/>
+      <BaseQr v-if='showQr' :code='lnString' style='height: fit-content;'/>
     </div>
   </div>
 </template>
 
 <script>
 import helpersMixin from '../utils/mixin'
-import BaseButtonCopy from '../components/BaseButtonCopy'
 import BaseQr from 'components/BaseQr'
-import BaseWallet from 'components/BaseWallet.vue'
 import * as bolt11Parser from 'light-bolt11-decoder'
 import { utils } from 'lnurl-pay'
+import { Notify } from 'quasar'
+import { launchPayment } from '../nostr/wallet/bitcoinConnect'
 
 export default {
   name: 'BaseLightningCard',
   mixins: [helpersMixin],
+  emits: ['paid'],
   props: {
-    lnString: {type: String, required: true},
-    pubkey: {type: String, default: null},
-    rowOrColumn: {type: String, default: 'column'}
+    lnString: { type: String, required: true },
+    pubkey: { type: String, default: null },
+    rowOrColumn: { type: String, default: 'column' }
   },
   components: {
-    BaseButtonCopy,
     BaseQr,
-    BaseWallet,
   },
 
   data() {
     return {
       request: {},
-      mode: this.$store.state.config.preferences.lightningTips.lastMode,
+      amount: this.$store.state.config.preferences.lightningTips.presets[0],
+      paying: false,
+      showQr: false,
     }
   },
 
@@ -78,49 +85,65 @@ export default {
       try {
         let inv = bolt11Parser.decode(this.lnString)
         let sections = {}
-        inv.sections.forEach(({name, value}) => {
-          sections[name] = value
-        })
-        let amount = sections.amount ? sections.amount / 1000 : null
-        let description = sections.description
-        let created = sections.timestamp
-        let expiresValue = sections.expiry
-        let parsed = parseInt(expiresValue)
-        let expires = isNaN(parsed) ? null : created + parsed
-        let request = inv.paymentRequest
+        inv.sections.forEach(({ name, value }) => { sections[name] = value })
         return {
-          amount,
-          description,
-          created,
-          expires,
-          request
+          amount: sections.amount ? sections.amount / 1000 : null,
+          description: sections.description,
+          request: inv.paymentRequest
         }
       } catch (error) {
-        console.log('invoice parsing error', error)
-        let request = this.lnString
-        return { error, request }
+        return { error, request: this.lnString }
       }
     },
     type() {
-      if (this.lnString.startsWith('lnbc')) return 'invoice'
-      return 'lnurl'
+      return this.lnString.startsWith('lnbc') ? 'invoice' : 'lnurl'
+    },
+    presets() {
+      return this.$store.state.config.preferences.lightningTips.presets
+    },
+    payLabel() {
+      return this.type === 'lnurl' ? `zap ${this.amount || 0}` : 'pay'
     },
   },
+
   async mounted() {
-    if (this.both11) return
+    if (this.bolt11) return
     if (!utils.isLnurl(this.lnString)) {
       this.request.error = 'invalid lnurl'
       return
     }
-
     let lnAddr = this.lnurlToLnAddr(this.lnString)
     if (lnAddr) this.request.lnAddr = lnAddr
   },
+
   methods: {
-    updateMode(mode) {
-      this.mode = mode
-      this.$store.commit('setConfigLightningTips', { key: 'lastMode', value: mode })
-    }
+    async pay() {
+      if (this.paying) return
+      if (this.type === 'lnurl' && !this.amount) return
+      this.paying = true
+      try {
+        let invoice = this.lnString
+        if (this.type === 'lnurl') {
+          // zap-aware: attaches a signed NIP-57 zap request when supported
+          invoice = await this.getInvoice(this.lnString, this.amount, this.pubkey)
+          if (!invoice || !invoice.toLowerCase().startsWith('lnbc')) {
+            throw new Error('could not fetch an invoice for this user')
+          }
+        }
+        await launchPayment({
+          invoice,
+          onPaid: () => {
+            Notify.create({ message: this.type === 'lnurl' ? 'zapped ⚡' : 'payment sent ⚡' })
+            this.paying = false
+            this.$emit('paid')
+          },
+          onCancelled: () => { this.paying = false },
+        })
+      } catch (e) {
+        Notify.create({ message: `payment failed: ${e?.message || e}`, color: 'negative' })
+        this.paying = false
+      }
+    },
   },
 }
 </script>
@@ -133,12 +156,6 @@ export default {
   margin: .3rem;
 }
 .q-btn {
-  opacity: .7;
   transition: all .3s ease-in-out;
 }
-.q-btn:hover {
-  opacity: 1;
-}
-
 </style>
-

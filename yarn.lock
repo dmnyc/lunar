@@ -122,10 +122,26 @@
   resolved "https://registry.yarnpkg.com/@eslint/js/-/js-8.57.1.tgz#de633db3ec2ef6a3c89e2f19038063e8a122e2c2"
   integrity sha512-d9zaMRSTIKDLhctzH12MtXvJKSSUhaHcjV+2Z+GK+EEY7XKpP5yR4x+N3TAcHTcu963nIr+TMcCb4DBCYX1z6Q==
 
+"@getalby/bitcoin-connect@^3.12.3":
+  version "3.12.3"
+  resolved "https://registry.yarnpkg.com/@getalby/bitcoin-connect/-/bitcoin-connect-3.12.3.tgz#4005545e71643d89f27ef58a2e4c02f258bfa676"
+  integrity sha512-2d+tNHBCZBoImKJgZwTUOyK9ypXaTg/hwvtQ8EHbgSKKkuycOrks7SzlUc0iJHthD3JGFVMWZEgOgw4AQVVE4w==
+  dependencies:
+    "@getalby/lightning-tools" "^8.1.1"
+    "@getalby/sdk" "^8.0.3"
+    "@lightninglabs/lnc-web" "^0.3.6-alpha"
+    qrcode-generator "1.4.4"
+    zustand "^5.0.13"
+
 "@getalby/lightning-tools@^6.0.0":
   version "6.1.0"
   resolved "https://registry.yarnpkg.com/@getalby/lightning-tools/-/lightning-tools-6.1.0.tgz#558b90a83b961cb6aa760e62de69f5b5ceeb2fe9"
   integrity sha512-rGurar9X4Gm+9xwoNYS8s9YLK7ZYqvbqv4KbHLYV0LEeB0HxZHRgmxblGqg+fYfp6iiYHx+edIgUpt9rS3VwFw==
+
+"@getalby/lightning-tools@^8.1.1":
+  version "8.1.1"
+  resolved "https://registry.yarnpkg.com/@getalby/lightning-tools/-/lightning-tools-8.1.1.tgz#4bf8be9f30dd76f7dd082262e862e63c16591fae"
+  integrity sha512-gB+3fvTGz9bbl31JNgKMWqG4dZWgCxSB51fYn+F4tZ3x2h5oI/yHjvb6W9GBo2Zscr5gMP64gs0LlzKYoETlvQ==
 
 "@getalby/sdk@^7.0.0":
   version "7.0.0"
@@ -134,6 +150,14 @@
   dependencies:
     "@getalby/lightning-tools" "^6.0.0"
     nostr-tools "^2.17.0"
+
+"@getalby/sdk@^8.0.3":
+  version "8.0.3"
+  resolved "https://registry.yarnpkg.com/@getalby/sdk/-/sdk-8.0.3.tgz#dd59ce94682c1c041fa90b42c16e959aa2d59f03"
+  integrity sha512-vPEogAWwLHbL55COeXrRN7yRBXMDGDxX1M2A+o3Lqw60FFng6fa9FK9sw8ptdILMD1dQZq8FzPXuabQ7seoDBA==
+  dependencies:
+    "@getalby/lightning-tools" "^8.1.1"
+    nostr-tools "^2.23.3"
 
 "@humanwhocodes/config-array@^0.13.0":
   version "0.13.0"
@@ -216,6 +240,19 @@
   dependencies:
     "@jridgewell/resolve-uri" "^3.1.0"
     "@jridgewell/sourcemap-codec" "^1.4.14"
+
+"@lightninglabs/lnc-core@^0.3.6-alpha":
+  version "0.3.6-alpha"
+  resolved "https://registry.yarnpkg.com/@lightninglabs/lnc-core/-/lnc-core-0.3.6-alpha.tgz#43cf66c6134cbc6edfcf55c857cc32c2a9ee825d"
+  integrity sha512-ObzY5wi+PS0GQduFHYDjGJpYZxKD27vtMf3fUVne2gGNMej1mvvJAOwATgef8YV/IZodAzy73Z/F2zfaQ+iE4Q==
+
+"@lightninglabs/lnc-web@^0.3.6-alpha":
+  version "0.3.6-alpha"
+  resolved "https://registry.yarnpkg.com/@lightninglabs/lnc-web/-/lnc-web-0.3.6-alpha.tgz#c43ed87f3eea6fccf26f9e4d27bd17b8f30e20ef"
+  integrity sha512-oiL1mKlbEjb1lcmNAHA0Gn+mlx5oQOJ8YVONJR/vgo4QLmL/48EyA12QbZ71mP9li45hGOoGqpYMRwBYtIeFog==
+  dependencies:
+    "@lightninglabs/lnc-core" "^0.3.6-alpha"
+    crypto-js "4.2.0"
 
 "@noble/ciphers@2.1.1":
   version "2.1.1"
@@ -1688,6 +1725,11 @@ crypto-browserify@^3.12.1:
     public-encrypt "^4.0.3"
     randombytes "^2.1.0"
     randomfill "^1.0.4"
+
+crypto-js@4.2.0:
+  version "4.2.0"
+  resolved "https://registry.yarnpkg.com/crypto-js/-/crypto-js-4.2.0.tgz#4d931639ecdfd12ff80e8186dba6af2c2e856631"
+  integrity sha512-KALDyEYgpY+Rlob/iriUtjV6d5Eq+Y191A5g4UqLAi8CyGP9N1+FdVbkc1SxKc2r4YAYqG8JzO2KGL+AizD70Q==
 
 cssesc@^3.0.0:
   version "3.0.0"
@@ -3619,6 +3661,19 @@ nostr-tools@^2.13.0, nostr-tools@^2.17.0, nostr-tools@^2.4.0, nostr-tools@^2.7.1
     "@scure/bip39" "2.0.1"
     nostr-wasm "0.1.0"
 
+nostr-tools@^2.23.3:
+  version "2.23.8"
+  resolved "https://registry.yarnpkg.com/nostr-tools/-/nostr-tools-2.23.8.tgz#8a91c1eee15aabf59685e5fb5b104767898a665e"
+  integrity sha512-XY0d/JCekfUeWNcqtbg6GT7aeqlBRjWAI7wzRP0dRvhBkgpOsGvGe6JysBevEzBdOyk11q6p6zuj/wUVkq1qAg==
+  dependencies:
+    "@noble/ciphers" "2.1.1"
+    "@noble/curves" "2.0.1"
+    "@noble/hashes" "2.0.1"
+    "@scure/base" "2.0.0"
+    "@scure/bip32" "2.0.1"
+    "@scure/bip39" "2.0.1"
+    nostr-wasm "0.1.0"
+
 nostr-wasm@0.1.0:
   version "0.1.0"
   resolved "https://registry.yarnpkg.com/nostr-wasm/-/nostr-wasm-0.1.0.tgz#17af486745feb2b7dd29503fdd81613a24058d94"
@@ -3968,6 +4023,11 @@ punycode@^2.1.0:
   version "2.3.1"
   resolved "https://registry.yarnpkg.com/punycode/-/punycode-2.3.1.tgz#027422e2faec0b25e1549c3e1bd8309b9133b6e5"
   integrity sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg==
+
+qrcode-generator@1.4.4:
+  version "1.4.4"
+  resolved "https://registry.yarnpkg.com/qrcode-generator/-/qrcode-generator-1.4.4.tgz#63f771224854759329a99048806a53ed278740e7"
+  integrity sha512-HM7yY8O2ilqhmULxGMpcHSF1EhJJ9yBj8gvDEuZ6M+KGJ0YY2hKpnXvRD+hZPLrDVck3ExIGhmPtSdcjC+guuw==
 
 qs@^6.12.3, qs@~6.15.1:
   version "6.15.2"
@@ -5051,6 +5111,11 @@ zip-stream@^4.1.0:
     archiver-utils "^3.0.4"
     compress-commons "^4.1.2"
     readable-stream "^3.6.0"
+
+zustand@^5.0.13:
+  version "5.0.14"
+  resolved "https://registry.yarnpkg.com/zustand/-/zustand-5.0.14.tgz#18216c24fcb980cf36898f9c57520e67b1f77855"
+  integrity sha512-/8tAspM5LMPr28b3fwLYrtdj77ECpfZviaP75CMTnwO8ISyaE4GDIG/9rDDYq/cH9D2Xw2A2RXglLInmVBQB/g==
 
 zwitch@^2.0.4:
   version "2.0.4"

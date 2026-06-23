@@ -337,11 +337,13 @@
           flat
           unelevated
           dense
+          size='sm'
+          :icon="showPreview ? 'visibility_off' : 'visibility'"
+          :label="showPreview ? 'hide' : 'preview'"
           :color="showPreview ? 'accent' : 'primary'"
           @click.stop='showPreview = !showPreview'
         >
-          <q-icon :name="showPreview ? 'visibility_off' : 'visibility'" size='sm'/>
-          <q-tooltip>{{ showPreview ? 'hide preview' : 'preview' }}</q-tooltip>
+          <q-tooltip>{{ showPreview ? 'hide preview' : 'preview the rendered note' }}</q-tooltip>
         </q-btn>
         <q-btn
           flat
@@ -1390,7 +1392,7 @@ ul, li {
 .input-area #input-readonly-highlight {
   outline: none;
   border: none;
-  min-height: 3rem;
+  min-height: 7rem;
   width: 100%;
   word-wrap: break-word;
   word-break: break-word;

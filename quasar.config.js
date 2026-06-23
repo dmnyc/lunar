@@ -22,7 +22,7 @@ module.exports = configure(async function (/* ctx */) {
     // app boot file (/src/boot)
     // --> boot files are part of 'main.js'
     // https://v2.quasar.dev/quasar-cli-vite/boot-files
-    boot: ['unregister-sw', 'pinia', 'auth', 'global-components', 'i18n'],
+    boot: ['unregister-sw', 'pinia', 'auth', 'bitcoin-connect', 'global-components', 'i18n'],
 
     // https://v2.quasar.dev/quasar-cli-vite/quasar-config-js#css
     css: ['app.scss'],

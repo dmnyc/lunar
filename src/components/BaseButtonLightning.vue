@@ -17,7 +17,7 @@
       tip with bitcoin lightning network
     </q-tooltip>
     <q-dialog v-model="showLightningCard">
-      <BaseLightningCard :ln-string='lnString' :pubkey='pubkey' style='padding: 1.5rem;'/>
+      <BaseLightningCard :ln-string='lnString' :pubkey='pubkey' style='padding: 1.5rem;' @paid='showLightningCard = false'/>
     </q-dialog>
   </q-btn>
   <q-btn v-if='oneClick' icon='arrow_drop_down' class='no-padding' dense unelevated :size='size' @click.stop="showLightningCard=!showLightningCard">

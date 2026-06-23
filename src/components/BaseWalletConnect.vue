@@ -35,8 +35,8 @@
       </div>
       <span class='text-secondary' style='font-size: .75rem;'>paste a connection string from Alby Hub, Yakihonne, Rizful, or Minibits</span>
       <div class='flex row' style='gap: .4rem;'>
+        <q-btn size='sm' outline color='primary' icon='bolt' label='Bitcoin Connect' @click='connectBitcoinConnect'/>
         <q-btn v-if='hasWebln' size='sm' outline color='primary' icon='extension' label='connect browser wallet (WebLN)' @click='connectWebln'/>
-        <q-btn size='sm' outline color='secondary' icon='hourglass_empty' label='Spark (coming soon)' disable/>
       </div>
       <q-btn size='sm' flat dense icon='cloud_download' label='restore from nostr backup' :loading='restoring' @click='restoreFromNostr'/>
       <span v-if='error' class='text-negative' style='font-size: .8rem;'>{{ error }}</span>
@@ -175,6 +175,14 @@ export default defineComponent({
         this.wallet.refreshBalance()
       } catch (e) {
         this.error = e?.message || 'could not connect browser wallet'
+      }
+    },
+    async connectBitcoinConnect() {
+      this.error = ''
+      try {
+        await this.wallet.connectBitcoinConnect()
+      } catch (e) {
+        this.error = e?.message || 'could not open Bitcoin Connect'
       }
     },
   },

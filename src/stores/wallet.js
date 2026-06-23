@@ -89,6 +89,20 @@ export const useWalletStore = defineStore('wallet', {
       return this.addWallet(WALLET_NWC, getNwcDisplayName(connectionUrl), connectionUrl)
     },
 
+    // Connect any wallet (WebLN/NWC/Alby) via the Bitcoin Connect modal. The
+    // connection is WebLN-compatible, so it's stored as a WebLN-kind wallet and
+    // its provider drives pay/balance.
+    async connectBitcoinConnect() {
+      const bc = await import('../nostr/wallet/bitcoinConnect')
+      bc.setOnConnect(() => {
+        const existing = this.wallets.find((w) => w.kind === WALLET_WEBLN)
+        if (existing) this.setActiveWallet(existing.id)
+        else this.addWallet(WALLET_WEBLN, 'Bitcoin Connect', 'bitcoin-connect')
+        this.refreshBalance()
+      })
+      await bc.launchConnect()
+    },
+
     // Add the browser WebLN wallet.
     connectWeblnWallet() {
       if (!isWeblnAvailable()) throw new Error('No WebLN provider (browser extension) detected')
