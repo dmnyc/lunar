@@ -194,7 +194,7 @@
             <p>You're signed in with a <strong>browser extension</strong>. Your private key stays in the extension — Lunar never sees it. This is the secure setup, so there's nothing to back up here.</p>
           </template>
           <template v-else-if="authMethod === 'nip46'">
-            <p>You're signed in with a <strong>remote signer</strong> (e.g. Amber). Your private key stays in your signer — Lunar never sees it. This is the secure setup, so there's nothing to back up here.</p>
+            <p>You're signed in with a <strong>remote signer</strong>. Your private key stays in your signer — Lunar never sees it. This is the secure setup, so there's nothing to back up here.</p>
           </template>
           <template v-else>
             <p>You're signed in with a <strong>public key only</strong> (read-only). To publish, sign in with your private key, a browser extension, or a remote signer.</p>

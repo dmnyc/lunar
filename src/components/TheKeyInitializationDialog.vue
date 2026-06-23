@@ -18,7 +18,92 @@
         <span style='padding: .2rem 0 0 .2rem;'>note: after login this same information can be found in
         the <strong>faq</strong> section at the bottom of the settings page</span>
       </q-expansion-item>
-      <h2 class="text-subtitle2 q-pr-md">enter your key</h2>
+
+      <div class='q-mt-sm flex column' style='gap: .4rem;'>
+        <h2 class="text-subtitle2 q-pr-md">sign in with a signer</h2>
+        <div class='flex row no-wrap' style='gap: .4rem;'>
+          <q-btn
+            v-if='hasExtension'
+            size='sm'
+            color='primary'
+            outline
+            class='col'
+            icon-right='extension'
+            label='browser extension'
+            :loading='extensionConnecting'
+            @click='loginWithExtension'
+          />
+          <q-btn
+            size='sm'
+            color='primary'
+            outline
+            class='col'
+            icon-right='vpn_key'
+            label='remote signer'
+            @click='showBunker = !showBunker'
+          />
+        </div>
+        <div v-if='showBunker' class='flex column' style='gap: .5rem;'>
+          <!-- paste a bunker:// string -->
+          <div class='flex row no-wrap items-center' style='gap: .3rem;'>
+            <q-input
+              v-model='bunkerString'
+              dense
+              outlined
+              class='col'
+              label='bunker:// connection string'
+            />
+            <q-btn
+              size='sm'
+              color='positive'
+              label='connect'
+              :loading='bunkerConnecting'
+              :disable='!bunkerString'
+              @click='loginWithBunker'
+            />
+          </div>
+          <span class='text-secondary' style='font-size: .75rem;'>paste a bunker:// string from Amber, Clave, or Primal</span>
+
+          <!-- or scan a nostrconnect QR with the signer app -->
+          <div class='flex row items-center' style='gap: .5rem;'>
+            <q-separator class='col' color='accent'/>
+            <span class='text-secondary' style='font-size: .75rem;'>or scan with your signer</span>
+            <q-separator class='col' color='accent'/>
+          </div>
+
+          <div v-if='!nostrconnectUri' class='flex justify-center'>
+            <q-btn
+              size='sm'
+              color='primary'
+              outline
+              icon-right='qr_code_2'
+              label='generate QR code'
+              :loading='startingPairing'
+              @click='startNostrConnect'
+            />
+          </div>
+
+          <div v-else class='flex column items-center' style='gap: .4rem;'>
+            <div class='bg-white q-pa-sm' style='border-radius: .4rem;'>
+              <BaseQr :code='nostrconnectUri'/>
+            </div>
+            <div class='flex row items-center' style='gap: .3rem;'>
+              <q-spinner-dots v-if='pairingStatus' color='accent' size='sm'/>
+              <span style='font-size: .8rem;'>{{ pairingStatus }}</span>
+            </div>
+            <div class='flex row no-wrap' style='gap: .4rem;'>
+              <q-btn size='sm' color='primary' outline icon='open_in_new' label='open signer app' @click='openInSignerApp'/>
+              <q-btn size='sm' flat icon='content_copy' label='copy' @click='copyNostrconnect'/>
+            </div>
+            <span class='text-secondary text-center' style='font-size: .72rem; max-width: 22rem;'>
+              scan this with Amber, Clave, or another NIP-46 signer, or tap “open signer app” on mobile, then approve the connection.
+            </span>
+          </div>
+        </div>
+        <span v-if='signerError' class='text-negative' style='font-size: .8rem;'>{{ signerError }}</span>
+      </div>
+
+      <h2 class="text-subtitle2 q-pr-md">or enter a key directly</h2>
       <q-form @submit="proceed">
         <q-card-section class="key-entry no-padding">
           <q-btn-group spread unelevated>
@@ -101,53 +186,6 @@
       {{ hexKey }}
       </div> -->
       </q-form>
-
-      <div class='q-mt-sm flex column' style='gap: .4rem;'>
-        <h2 class="text-subtitle2 q-pr-md">or sign in with a signer</h2>
-        <div class='flex row no-wrap' style='gap: .4rem;'>
-          <q-btn
-            v-if='hasExtension'
-            size='sm'
-            color='primary'
-            outline
-            class='col'
-            icon-right='extension'
-            label='browser extension'
-            :loading='extensionConnecting'
-            @click='loginWithExtension'
-          />
-          <q-btn
-            size='sm'
-            color='primary'
-            outline
-            class='col'
-            icon-right='vpn_key'
-            label='remote signer'
-            @click='showBunker = !showBunker'
-          />
-        </div>
-        <div v-if='showBunker' class='flex column' style='gap: .3rem;'>
-          <div class='flex row no-wrap items-end' style='gap: .3rem;'>
-            <q-input
-              v-model='bunkerString'
-              dense
-              outlined
-              class='col'
-              label='bunker:// connection string'
-              hint='paste a bunker:// string from Amber or Primal'
-            />
-            <q-btn
-              size='sm'
-              color='positive'
-              label='connect'
-              :loading='bunkerConnecting'
-              :disable='!bunkerString'
-              @click='loginWithBunker'
-            />
-          </div>
-        </div>
-        <span v-if='signerError' class='text-negative' style='font-size: .8rem;'>{{ signerError }}</span>
-      </div>
       <q-expansion-item
         v-if='isKeyValid'
         dense
@@ -220,9 +258,11 @@ import { defineComponent } from 'vue'
 import helpersMixin from '../utils/mixin'
 import { generatePrivateKey, nip06 } from '../utils/ntcompat'
 import { getAuthManager } from '../nostr/authManager'
+import { copyToClipboard, Notify } from 'quasar'
 // import { decode } from 'bech32-buffer'
 import BaseSelectMultiple from 'components/BaseSelectMultiple.vue'
 import BaseInformation from 'components/BaseInformation.vue'
+import BaseQr from 'components/BaseQr.vue'
 
 export default defineComponent({
   name: 'TheKeyInitializationDialog',
@@ -232,6 +272,7 @@ export default defineComponent({
   components: {
     BaseSelectMultiple,
     BaseInformation,
+    BaseQr,
   },
 
   setup() {
@@ -246,7 +287,10 @@ export default defineComponent({
     return {
       watchOnly: false,
       key: null,
-      hasExtension: false,
+      // detect a NIP-07 extension immediately (most inject window.nostr before
+      // mount); the delayed re-check in created() is just a fallback for
+      // late-injecting extensions, so the button doesn't pop in after load
+      hasExtension: typeof window !== 'undefined' && !!window.nostr,
       selectedRelays: this.$store.state.defaultRelays,
       newRelay: '',
       showBunker: false,
@@ -254,6 +298,11 @@ export default defineComponent({
       bunkerConnecting: false,
       extensionConnecting: false,
       signerError: '',
+      nostrconnectUri: '',
+      pairingStatus: '',
+      startingPairing: false,
+      authUnsub: null,
+      finishedLogin: false,
     }
   },
 
@@ -325,6 +374,29 @@ export default defineComponent({
         }
       }, 1000)
     }
+
+    // Watch the signer for async logins (NIP-46 nostrconnect approval arrives
+    // via a relay listener, not a button click) — finish login when it lands.
+    const auth = getAuthManager()
+    if (auth) {
+      this.authUnsub = auth.subscribe((state) => {
+        if (state.isAuthenticated && state.publicKey) this.handleAuthenticated(state.publicKey)
+        else if (state.error) this.signerError = state.error
+      })
+      // Returning from a signer app (e.g. Amber) with a pairing in flight:
+      // re-arm the listener and show the QR/waiting state.
+      if (auth.hasPendingNip46Pairing && auth.hasPendingNip46Pairing()) {
+        this.showBunker = true
+        this.pairingStatus = 'waiting for approval…'
+        const pending = auth.getPendingNip46Info && auth.getPendingNip46Info()
+        if (pending) this.nostrconnectUri = '' // QR already scanned; just show status
+        auth.restartNip46ListenerIfPending && auth.restartNip46ListenerIfPending().catch(() => {})
+      }
+    }
+  },
+
+  beforeUnmount() {
+    if (this.authUnsub) this.authUnsub()
   },
 
   methods: {
@@ -386,6 +458,14 @@ export default defineComponent({
       this.$router.push({ name: 'settings', params: { initUser: true } })
     },
 
+    // Single funnel for every signer login (extension / bunker / nostrconnect),
+    // fired by the auth-state subscription. Guarded so it runs once.
+    handleAuthenticated(pub) {
+      if (this.finishedLogin || !pub) return
+      this.finishedLogin = true
+      this.finishRemoteLogin(pub)
+    },
+
     async loginWithExtension() {
       this.signerError = ''
       const auth = getAuthManager()
@@ -395,8 +475,7 @@ export default defineComponent({
       }
       this.extensionConnecting = true
       try {
-        const pub = await auth.authenticateWithNIP07()
-        this.finishRemoteLogin(pub)
+        await auth.authenticateWithNIP07() // subscription → handleAuthenticated
       } catch (err) {
         this.signerError = err?.message || 'could not connect to extension'
       } finally {
@@ -413,13 +492,44 @@ export default defineComponent({
       }
       this.bunkerConnecting = true
       try {
-        const pub = await auth.authenticateWithNIP46(this.bunkerString.trim())
-        this.finishRemoteLogin(pub)
+        await auth.authenticateWithNIP46(this.bunkerString.trim())
       } catch (err) {
         this.signerError = err?.message || 'could not connect to remote signer'
       } finally {
         this.bunkerConnecting = false
       }
+    },
+
+    // nostrconnect:// — generate a pairing URI + QR; the signer connects to us
+    // and the auth-state subscription finishes the login.
+    async startNostrConnect() {
+      this.signerError = ''
+      const auth = getAuthManager()
+      if (!auth) {
+        this.signerError = 'signer not ready, please reload'
+        return
+      }
+      this.startingPairing = true
+      try {
+        const { uri } = await auth.startNip46PairingUniversal()
+        this.nostrconnectUri = uri
+        this.pairingStatus = 'waiting for approval…'
+      } catch (err) {
+        this.signerError = err?.message || 'could not start pairing'
+      } finally {
+        this.startingPairing = false
+      }
+    },
+
+    openInSignerApp() {
+      if (this.nostrconnectUri) window.open(this.nostrconnectUri, '_self')
+    },
+
+    copyNostrconnect() {
+      if (!this.nostrconnectUri) return
+      copyToClipboard(this.nostrconnectUri).then(() =>
+        Notify.create({ message: 'connection string copied' })
+      )
     },
   },
 })

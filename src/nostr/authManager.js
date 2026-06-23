@@ -17,7 +17,7 @@ import {
 import { nip19, getPublicKey, generateSecretKey } from 'nostr-tools'
 import * as nip44 from 'nostr-tools/nip44'
 import * as nip04 from 'nostr-tools/nip04'
-import { fetchNip46UserPubkey } from './nip46Rpc'
+import { fetchNip46UserPubkey, sendNip46Rpc } from './nip46Rpc'
 import { Nip44LocalSigner } from './nip44LocalSigner'
 
 const browser = typeof window !== 'undefined'
@@ -73,6 +73,32 @@ export class AuthManager {
   async fetchNip46UserPubkey() {
     if (!this.nip46Signer) throw new Error('NIP-46 signer not initialized')
     return fetchNip46UserPubkey(this.nip46Signer)
+  }
+
+  // Pair the client with the remote signer before any other RPC. Some signers
+  // (e.g. Clave) reject get_public_key with "Client not paired" until they
+  // receive a `connect` carrying the bunker secret — NDK's blockUntilReady
+  // doesn't reliably send that, so we issue an explicit connect first, then
+  // fall back to blockUntilReady for NDK's internal readiness state.
+  async pairWithSigner(signerPubkey, secret) {
+    try {
+      const params = secret ? [signerPubkey, secret] : [signerPubkey]
+      await sendNip46Rpc(this.nip46Signer, 'connect', params, 60000)
+      // Paired. Do NOT also call blockUntilReady — it would wait (up to its
+      // timeout) for its own connect ack that never arrives, adding dead time
+      // on the client after the signer already approved.
+      return
+    } catch (e) {
+      console.warn('[NIP-46] explicit connect failed, falling back to blockUntilReady:', e)
+    }
+    try {
+      await Promise.race([
+        this.nip46Signer.blockUntilReady(),
+        this.timeout(15000, 'signer not ready')
+      ])
+    } catch (e) {
+      console.warn('[NIP-46] blockUntilReady timed out, will still try get_public_key:', e)
+    }
   }
 
   async initializeFromStorage() {
@@ -243,11 +269,7 @@ export class AuthManager {
       this.primeSignerPubkeys(signerPubkey)
       this.ndk.signer = this.nip46Signer
 
-      try {
-        await Promise.race([this.nip46Signer.blockUntilReady(), this.timeout(30000, 'Connection timeout - bunker not responding')])
-      } catch (e) {
-        console.warn('[NIP-46] connect phase timed out, will still try get_public_key:', e)
-      }
+      await this.pairWithSigner(signerPubkey, secret)
 
       const userPubkey = await this.fetchNip46UserPubkey()
       const user = this.ndk.getUser({ pubkey: userPubkey })
@@ -298,7 +320,7 @@ export class AuthManager {
       this.ndk.signer = this.nip46Signer
 
       try {
-        await Promise.race([this.nip46Signer.blockUntilReady(), this.timeout(15000, 'Bunker reconnection timeout')])
+        await this.pairWithSigner(nip46Info.signerPubkey, nip46Info.secret)
       } catch (e) {
         console.warn('[NIP-46] Reconnection session establishment failed/timed out:', e)
       }
@@ -519,13 +541,10 @@ export class AuthManager {
 
       const signerToken = pendingInfo.secret ? `${signerPubkey}#${pendingInfo.secret}` : signerPubkey
       this.nip46Signer = new NDKNip46Signer(this.ndk, signerToken, localSigner)
+      this.primeSignerPubkeys(signerPubkey)
       this.ndk.signer = this.nip46Signer
 
-      try {
-        await Promise.race([this.nip46Signer.blockUntilReady(), this.timeout(15000, 'Session establishment timeout')])
-      } catch (e) {
-        console.warn('[NIP-46] Session establishment timed out:', e)
-      }
+      await this.pairWithSigner(signerPubkey, pendingInfo.secret)
 
       const userPubkey = await this.fetchNip46UserPubkey()
       const user = this.ndk.getUser({ pubkey: userPubkey })
