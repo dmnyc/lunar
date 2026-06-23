@@ -34,8 +34,8 @@
     </q-item>
     <!-- <q-separator v-if='!compactMode' color='accent' spaced/> -->
     <div v-if='!compactMode' style='min-height: 1rem;'/>
+    <template v-for='item in filteredUserMenuItems' :key='item.title'>
     <q-item
-      v-for='item in filteredUserMenuItems'
       clickable
       class='menu-item'
       :dense='compactMode'
@@ -43,7 +43,6 @@
       :active="($route.name === item.title || $route.path.split('/')[1] === item.title)"
       active-class=''
       @click='(event) => handleClick(event, item)'
-      :key='item.title'
       :class="(($route.name === item.title || $route.path.split('/')[1] === item.title) ? 'menu-item-active text-accent ' : '') +
         (compactMode ? 'no-margin no-padding col' : 'self-end q-px-none')"
     >
@@ -104,6 +103,13 @@
         />
       </div>
     </q-item>
+    <div
+      v-if="item.title === 'wallet' && !compactMode && $store.state.keys.pub"
+      class='flex justify-end gt-sm q-py-xs'
+    >
+      <BaseWalletCard compact/>
+    </div>
+    </template>
     <!-- <q-separator v-if='!compactMode' color='accent' spaced/> -->
     <div v-if='!compactMode' style='min-height: 1rem;'/>
       <div
@@ -132,9 +138,6 @@
           :size='compactMode ? "sm" : "lg"'
           :class='compactMode ? "" : "q-px-sm"'
         />
-      </div>
-      <div v-if='!compactMode && $store.state.keys.pub' class='q-my-sm gt-sm'>
-        <BaseWalletCard compact/>
       </div>
     <!-- <q-dialog
       v-model='post'

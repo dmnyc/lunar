@@ -14,24 +14,26 @@ export function namedProfiles(state, getters) {
 
 export function hasName(state) {
   return pubkey => {
-    let {name, nip05} = state.profilesCache[pubkey] || {}
-    return (name || nip05 || '').length > 0
+    let {name, display_name, displayName, nip05} = state.profilesCache[pubkey] || {}
+    return (display_name || displayName || name || nip05 || '').length > 0
   }
 }
 
 export function name(state) {
   return pubkey => {
-    let {name} = state.profilesCache[pubkey] || {}
-    return name
+    let {name, display_name, displayName} = state.profilesCache[pubkey] || {}
+    // kind-0 display_name (or displayName) is the friendly name; fall back to
+    // the name/handle.
+    return display_name || displayName || name
   }
 }
 
 export function displayName(state, getters) {
   return pubkey => {
-    let {name, nip05} = state.profilesCache[pubkey] || {}
+    let {name, display_name, displayName, nip05} = state.profilesCache[pubkey] || {}
 
+    if (display_name || displayName || name) return display_name || displayName || name
     if (nip05) return nip05.startsWith('_@') ? nip05.slice(2) : nip05
-    if (name) return name
     return helpersMixin.default.methods.shorten(helpersMixin.default.methods.hexToBech32(pubkey, 'npub'))
   }
 }

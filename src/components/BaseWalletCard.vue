@@ -37,8 +37,8 @@
       </div>
 
       <div class='flex row' style='gap: .5rem;'>
-        <q-btn class='col' outline color='primary' icon='arrow_upward' label='send' @click='openSend'/>
-        <q-btn class='col' outline color='primary' icon='arrow_downward' label='receive' @click='openReceive'/>
+        <q-btn class='col' unelevated color='primary' text-color='dark' icon='arrow_upward' label='send' @click='openSend'/>
+        <q-btn class='col' unelevated color='primary' text-color='dark' icon='arrow_downward' label='receive' @click='openReceive'/>
       </div>
 
       <!-- transaction history -->
@@ -51,7 +51,7 @@
           {{ wallet.txLoading ? 'loading…' : 'no transactions yet' }}
         </div>
         <div
-          v-for='(tx, i) in wallet.transactions'
+          v-for='(tx, i) in txs'
           :key='i'
           class='flex row no-wrap items-center justify-between q-py-xs tx-row'
         >
@@ -61,13 +61,15 @@
               :color='tx.type === "incoming" ? "positive" : "secondary"'
               size='sm'
             />
+            <BaseUserAvatar v-if='tx.pubkey' :pubkey='tx.pubkey' size='1.6rem'/>
             <div class='flex column' style='overflow: hidden;'>
-              <span class='ellipsis' style='max-width: 14rem;'>{{ tx.description || (tx.type === 'incoming' ? 'received' : 'sent') }}</span>
+              <span class='ellipsis' style='max-width: 13rem;'>{{ txLabel(tx) }}</span>
               <span class='text-secondary' style='font-size: .7rem;'>{{ txDate(tx) }}</span>
             </div>
           </div>
           <span :class='tx.type === "incoming" ? "text-positive" : ""' style='white-space: nowrap;'>
-            {{ tx.type === 'incoming' ? '+' : '-' }}{{ tx.amount.toLocaleString() }}
+            <template v-if='wallet.balanceVisible'>{{ tx.type === 'incoming' ? '+' : '-' }}{{ tx.amount.toLocaleString() }}</template>
+            <template v-else>••••</template>
           </span>
         </div>
       </div>
@@ -82,7 +84,7 @@
         <span v-if='sendError' class='text-negative' style='font-size: .8rem;'>{{ sendError }}</span>
         <div class='flex row justify-end' style='gap: .4rem;'>
           <q-btn flat label='cancel' v-close-popup/>
-          <q-btn unelevated color='primary' label='pay' :loading='sending' :disable='!sendInput' @click='doSend'/>
+          <q-btn unelevated color='primary' text-color='dark' label='pay' :loading='sending' :disable='!sendInput' @click='doSend'/>
         </div>
       </q-card>
     </q-dialog>
@@ -97,7 +99,7 @@
           <span v-if='receiveError' class='text-negative' style='font-size: .8rem;'>{{ receiveError }}</span>
           <div class='flex row justify-end full-width' style='gap: .4rem;'>
             <q-btn flat label='cancel' v-close-popup/>
-            <q-btn unelevated color='primary' label='create invoice' :loading='creating' :disable='!receiveAmount' @click='doReceive'/>
+            <q-btn unelevated color='primary' text-color='dark' label='create invoice' :loading='creating' :disable='!receiveAmount' @click='doReceive'/>
           </div>
         </template>
         <template v-else>
@@ -150,6 +152,11 @@ export default defineComponent({
     sendIsInvoice() {
       return this.sendInput.trim().toLowerCase().startsWith('lnbc')
     },
+    // Enrich transactions with the counterparty nostr pubkey parsed from the
+    // zap request (NIP-57 puts the kind-9734 JSON in the invoice description).
+    txs() {
+      return this.wallet.transactions.map((tx) => ({ ...tx, pubkey: this.zapCounterparty(tx) }))
+    },
   },
 
   mounted() {
@@ -165,8 +172,37 @@ export default defineComponent({
     refresh() {
       this.wallet.refreshBalance()
     },
-    loadTx() {
-      this.wallet.loadTransactions()
+    async loadTx() {
+      await this.wallet.loadTransactions()
+      // warm profiles for any zap counterparties so avatars/names render
+      const seen = new Set()
+      for (const tx of this.wallet.transactions) {
+        const pk = this.zapCounterparty(tx)
+        if (pk && !seen.has(pk)) {
+          seen.add(pk)
+          this.$store.dispatch('useProfile', { pubkey: pk })
+        }
+      }
+    },
+    // Counterparty pubkey of a zap: the sender for incoming, the recipient
+    // (p tag) for outgoing. null for plain (non-zap) payments.
+    zapCounterparty(tx) {
+      try {
+        const req = JSON.parse(tx.description)
+        if (!req || req.kind !== 9734) return null
+        if (tx.type === 'incoming') return req.pubkey
+        const p = (req.tags || []).find((t) => t[0] === 'p')
+        return p ? p[1] : null
+      } catch (_) {
+        return null
+      }
+    },
+    txLabel(tx) {
+      if (tx.pubkey) {
+        const name = this.$store.getters.displayName(tx.pubkey)
+        return tx.type === 'incoming' ? `zap from ${name}` : `zap to ${name}`
+      }
+      return tx.description || (tx.type === 'incoming' ? 'received' : 'sent')
     },
     txDate(tx) {
       const ts = (tx.settledAt || tx.createdAt) * 1000

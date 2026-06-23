@@ -70,6 +70,7 @@
           @blur='textareaBlur'
           @keypress.ctrl.enter="send"
           @click.stop='updateText'
+          @paste='onPaste'
           @touchstart.stop
           @mousedown.stop
         >
@@ -92,6 +93,22 @@
             <q-btn icon="remove_circle" clickable @click.stop='removeLink(index)' flat color="negative" size='xs' class='no-padding'/>
           </li>
         </ul>
+      </div>
+    </div>
+
+    <!-- image attachments detected in the draft -->
+    <div v-if='draftImages.length' class='flex row q-mb-sm' style='gap: .4rem; flex-wrap: wrap;'>
+      <div v-for='url in draftImages' :key='url' class='draft-thumb'>
+        <img :src='url' loading='lazy'/>
+        <q-btn
+          class='draft-thumb-remove'
+          icon='close'
+          size='xs'
+          round
+          dense
+          unelevated
+          @click.stop='removeDraftImage(url)'
+        />
       </div>
     </div>
 
@@ -521,6 +538,11 @@ export default {
         text += link.name ? `\n[${link.name}](${link.url})` : `\n${link.url}`
       }
       return this.interpolateMentions(text, [], this.$store).text
+    },
+    // Image URLs present in the draft → shown as thumbnails.
+    draftImages() {
+      const matches = (this.text || '').match(/https?:\/\/[^\s]+\.(?:png|jpe?g|gif|webp|svg)(?:\?[^\s]*)?/gi)
+      return matches ? [...new Set(matches)] : []
     },
   },
 
@@ -954,6 +976,41 @@ export default {
       this.focusInput()
     },
 
+    // Intercept image paste (clipboard file) → upload to nostr.build and insert
+    // the URL, instead of the browser injecting a giant inline data-URI image.
+    async onPaste(e) {
+      const items = e.clipboardData && e.clipboardData.items
+      if (!items) return
+      for (const item of items) {
+        if (item.type && item.type.startsWith('image/')) {
+          e.preventDefault()
+          const file = item.getAsFile()
+          if (!file) return
+          this.uploadingImage = true
+          try {
+            const url = await uploadImage(this.$store, file)
+            this.appendToEditor(url)
+          } catch (err) {
+            Notify.create({ message: `image upload failed: ${err?.message || err}`, color: 'negative' })
+          } finally {
+            this.uploadingImage = false
+          }
+          return
+        }
+      }
+    },
+
+    removeDraftImage(url) {
+      // strip the URL (and a leading newline/space) from the editor text
+      const next = (this.textarea.innerText || '').replace(new RegExp('\\n?\\s*' + this.escapeRegex(url)), '')
+      this.textarea.innerText = next
+      this.updateText()
+    },
+
+    escapeRegex(s) {
+      return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    },
+
     // ── drafts (localStorage) ───────────────────────────────────────────
     // Only the main compose box persists a draft; replies/DMs are transient.
     isMainCompose() {
@@ -1243,6 +1300,32 @@ ul, li {
 .post-preview {
   border: 1px solid var(--q-accent);
   border-radius: .4rem;
+}
+.post-preview :deep(img),
+.post-preview :deep(video) {
+  max-height: 12rem !important;
+  max-width: 100% !important;
+  border-radius: .4rem;
+}
+.draft-thumb {
+  position: relative;
+  width: 5rem;
+  height: 5rem;
+  border-radius: .4rem;
+  overflow: hidden;
+  border: 1px solid var(--q-accent);
+}
+.draft-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.draft-thumb-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  background: rgba(0, 0, 0, 0.6) !important;
+  color: #fff;
 }
 .post-countdown {
   border: 1px solid var(--q-primary);
