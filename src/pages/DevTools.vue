@@ -56,11 +56,11 @@ import { nip05 } from 'nostr-tools'
 
 const metaData = {
   // sets document title
-  title: 'astral - dev tools',
+  title: 'lunar - dev tools',
 
   // meta tags
   meta: {
-    description: { name: 'description', content: 'dev tools for astral Nostr client' },
+    description: { name: 'description', content: 'dev tools for lunar Nostr client' },
     keywords: { name: 'keywords', content: 'nostr decentralized social media' },
     equiv: { 'http-equiv': 'Content-Type', content: 'text/html; charset=UTF-8' },
   },

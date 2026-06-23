@@ -98,7 +98,7 @@ class PrimalCache {
   async searchUsers(query, limit = 10) {
     const ok = await this.connect()
     if (!ok) throw new Error('primal cache unavailable')
-    const id = `astral_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    const id = `lunar_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         const req = this.pending.get(id)

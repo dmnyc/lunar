@@ -120,8 +120,8 @@ module.exports = configure(async function (/* ctx */) {
       manifestFilename: 'manifest.json',
       useCredentialsForManifestTag: false,
       manifest: {
-        name: 'astral',
-        short_name: 'astral',
+        name: 'Lunar',
+        short_name: 'Lunar',
         description: 'decentralized social platform (nostr client)',
         display: 'standalone',
         orientation: 'portrait',
@@ -149,7 +149,7 @@ module.exports = configure(async function (/* ctx */) {
       bundler: 'packager',
       packager: {},
       builder: {
-        appId: 'ninja.astral'
+        appId: 'ninja.lunar'
       }
     }
   }

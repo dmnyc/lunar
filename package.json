@@ -1,8 +1,8 @@
 {
-  "name": "astral",
+  "name": "lunar",
   "version": "0.1.0",
   "description": "decentralized social platform (nostr client)",
-  "productName": "astral",
+  "productName": "Lunar",
   "author": "monica <monlovesmango@users.noreply.github.com>",
   "private": true,
   "scripts": {

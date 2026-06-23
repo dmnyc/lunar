@@ -69,7 +69,7 @@ export default {
       hasJustSharedRelay: false,
       hasWebLn: false,
       themes: {
-        astral: {
+        lunar: {
           primary: '#d671ea',
           secondary: '#5af2e0',
           accent: '#ecc865',

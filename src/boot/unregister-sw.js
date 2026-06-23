@@ -1,6 +1,6 @@
 import { boot } from 'quasar/wrappers'
 
-// The 2022 astral shipped as a PWA with a skipWaiting service worker. After the
+// The 2022 lunar shipped as a PWA with a skipWaiting service worker. After the
 // Vite overhaul we run in SPA mode (no SW), but a service worker registered by
 // a previous visit persists and keeps intercepting requests — serving the old,
 // now-incompatible cached shell, which shows up as a blank screen.

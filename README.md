@@ -1,6 +1,6 @@
-# astral
+# lunar
 
-[astral](https://astral.ninja) is a web client for interacting with [Nostr](https://github.com/fiatjaf/nostr), a protocol that attempts to make decentralized social media a reality. astral began as a fork of [Branle](https://github.com/fiatjaf/branle).
+[lunar](https://lunar.ninja) is a web client for interacting with [Nostr](https://github.com/fiatjaf/nostr), a protocol that attempts to make decentralized social media a reality. lunar began as a fork of [Branle](https://github.com/fiatjaf/branle).
 
 ## Install the dependencies
 ```bash
@@ -54,12 +54,12 @@ quasar build
 
 ### Build the docker image (uses PWA mode):
 ```bash
-docker build -t astral .
+docker build -t lunar .
 ```
 
 ### Run the container:
 ```bash
-docker run -d -p 8080:8000 --name astral astral
+docker run -d -p 8080:8000 --name lunar lunar
 ```
 
 and connect to 'http://localhost:8080/'

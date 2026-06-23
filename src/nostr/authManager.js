@@ -21,8 +21,8 @@ import { fetchNip46UserPubkey } from './nip46Rpc'
 import { Nip44LocalSigner } from './nip44LocalSigner'
 
 const browser = typeof window !== 'undefined'
-const APP_NAME = 'astral'
-const APP_URL = 'https://astral.ninja'
+const APP_NAME = 'lunar'
+const APP_URL = 'https://lunar.ninja'
 
 // localStorage keys
 const LS_PUBKEY = 'astral_loggedInPublicKey'

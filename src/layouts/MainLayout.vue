@@ -172,7 +172,7 @@ export default defineComponent({
       middlePagePos: {},
       fabPos: [0, 10],
       draggingFab: false,
-      broadcastChannel: new BroadcastChannel('astral'),
+      broadcastChannel: new BroadcastChannel('lunar'),
       activeWindow: false,
       timeout: null,
       hasLaunched: false,
@@ -206,7 +206,7 @@ export default defineComponent({
   },
 
   mounted() {
-    // coordinate closing/opening of db if multiple astral windows
+    // coordinate closing/opening of db if multiple lunar windows
     // this.broadcastChannel.onmessage = (event) => {
     //   let {type} = event.data
 

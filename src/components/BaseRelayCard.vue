@@ -35,7 +35,7 @@ export default {
         this.$q
           .dialog({
             title: 'set your first relay?',
-            message: `if you are a new user click proceed. if you are a user that already has a relay list, astral has not been
+            message: `if you are a new user click proceed. if you are a user that already has a relay list, lunar has not been
             able to find it yet. if you hit proceed it will clear your relay list and replace it with this single relay.`,
             cancel: {color: 'accent'},
             ok: {color: 'accent', label: 'proceed'}

@@ -324,14 +324,14 @@ export async function publishEvent(store, {unpublishedEvent}) {
     default:
       eventTypeWordy = `kind ${unpublishedEvent.kind}`
   }
-  // NIP-89 client tag — identifies astral as the publishing client. Added
+  // NIP-89 client tag — identifies lunar as the publishing client. Added
   // before signing so it's covered by the signature. Skipped for kind 4 DMs
   // (no client fingerprint on private messages) and never duplicated.
   if (
     unpublishedEvent.kind !== 4 &&
     !(unpublishedEvent.tags || []).some((t) => t[0] === 'client')
   ) {
-    unpublishedEvent.tags = [...(unpublishedEvent.tags || []), ['client', 'astral']]
+    unpublishedEvent.tags = [...(unpublishedEvent.tags || []), ['client', 'lunar']]
   }
 
   try {
