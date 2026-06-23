@@ -65,6 +65,11 @@ After: check the Docker build GitHub Action + any lunar.ninja deploy/DNS.
   noswhere/nos.today, NOT nostr.band): `src/nostr/profileSearch.js`, wired into
   `TheSearchMenu` (search-as-you-type results).
 - Rebrand astral→Lunar (copy, titles, client tag, app id, logo, OG tags).
+- **Backup-to-nostr**: NWC connection string backed up via NIP-78 (kind 30078,
+  d-tag `lunar-nwc-backup`), NIP-44 encrypted to self. `src/nostr/encryptionService.js`
+  (signer-agnostic self encrypt/decrypt: local key / NIP-07 / NIP-46 RPC) +
+  `src/nostr/wallet/nwcBackup.js` (signs via signAsynchronously → query.publish
+  so local-key users work). Back up / restore buttons in `BaseWalletConnect`.
 
 ## Gotchas
 - `$primary` is **white** (#ffffff) → any FILLED `q-btn color="primary"` is
@@ -74,13 +79,10 @@ After: check the Docker build GitHub Action + any lunar.ninja deploy/DNS.
   copy if desired.
 
 ## Next / pending
-1. **Backup-to-nostr** — NWC connection backup via NIP-78 (kind 30078) +
-   NIP-44. Port zapcooking `src/lib/wallet/nwcBackup.ts` + `encryptionService.ts`
-   (the latter handles encrypt/decrypt across local-key / NIP-07 / NIP-46).
-2. **Spark wallet** — `@breeztech/breez-sdk-spark` (big WASM). Currently
+1. **Spark wallet** — `@breeztech/breez-sdk-spark` (big WASM). Currently
    scaffolded as "coming soon" (kind 4) in the wallet store. zapcooking
    `src/lib/spark/` is the reference.
-3. **Phase 6 polish** — re-enable PWA (then remove `src/boot/unregister-sw.js`),
+2. **Phase 6 polish** — re-enable PWA (then remove `src/boot/unregister-sw.js`),
    delete orphaned `src/*.worker.js` + sql.js, NIP-65 relay management UI,
    migrate `astral_*` storage keys if wanted.
 

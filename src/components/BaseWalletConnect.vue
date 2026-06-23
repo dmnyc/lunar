@@ -16,6 +16,9 @@
         </div>
         <q-btn size='sm' outline dense color='negative' label='disconnect' @click='confirmDisconnect(w)'/>
       </div>
+      <div v-if='activeIsNwc' class='flex row' style='gap: .4rem;'>
+        <q-btn size='sm' flat dense icon='cloud_upload' label='back up to nostr' :loading='backingUp' @click='backupToNostr'/>
+      </div>
     </div>
 
     <!-- connect a wallet (hidden once one is connected) -->
@@ -35,6 +38,7 @@
         <q-btn v-if='hasWebln' size='sm' outline color='primary' icon='extension' label='connect browser wallet (WebLN)' @click='connectWebln'/>
         <q-btn size='sm' outline color='secondary' icon='hourglass_empty' label='Spark (coming soon)' disable/>
       </div>
+      <q-btn size='sm' flat dense icon='cloud_download' label='restore from nostr backup' :loading='restoring' @click='restoreFromNostr'/>
       <span v-if='error' class='text-negative' style='font-size: .8rem;'>{{ error }}</span>
     </div>
   </div>
@@ -45,6 +49,7 @@ import { defineComponent } from 'vue'
 import { Notify } from 'quasar'
 import { useWalletStore, WALLET_WEBLN, WALLET_NWC, WALLET_SPARK } from 'stores/wallet'
 import { isWeblnAvailable } from '../nostr/wallet/webln'
+import { backupNwcToNostr, restoreNwcFromNostr } from '../nostr/wallet/nwcBackup'
 
 export default defineComponent({
   name: 'BaseWalletConnect',
@@ -59,10 +64,48 @@ export default defineComponent({
       connecting: false,
       error: '',
       hasWebln: isWeblnAvailable(),
+      backingUp: false,
+      restoring: false,
     }
   },
 
+  computed: {
+    activeIsNwc() {
+      return this.wallet.activeWallet?.kind === WALLET_NWC
+    },
+  },
+
   methods: {
+    async backupToNostr() {
+      this.error = ''
+      this.backingUp = true
+      try {
+        await backupNwcToNostr(this.$store, this.wallet.activeWallet.data)
+        Notify.create({ message: 'wallet backed up to nostr ✓' })
+      } catch (e) {
+        this.error = e?.message || 'backup failed'
+      } finally {
+        this.backingUp = false
+      }
+    },
+    async restoreFromNostr() {
+      this.error = ''
+      this.restoring = true
+      try {
+        const conn = await restoreNwcFromNostr(this.$store)
+        if (!conn) {
+          this.error = 'no backup found on your relays'
+          return
+        }
+        await this.wallet.connectNwcWallet(conn)
+        Notify.create({ message: 'wallet restored from nostr ⚡' })
+        this.wallet.refreshBalance()
+      } catch (e) {
+        this.error = e?.message || 'restore failed'
+      } finally {
+        this.restoring = false
+      }
+    },
     confirmDisconnect(w) {
       this.$q.dialog({
         title: 'disconnect wallet',
