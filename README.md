@@ -1,6 +1,8 @@
-# lunar
+# Lunar
 
-[lunar](https://lunar.ninja) is a web client for interacting with [Nostr](https://github.com/fiatjaf/nostr), a protocol that attempts to make decentralized social media a reality. lunar began as a fork of [Branle](https://github.com/fiatjaf/branle).
+[Lunar](https://lunar.ninja) is a web client for interacting with [Nostr](https://github.com/fiatjaf/nostr), a protocol that attempts to make decentralized social media a reality.
+
+Lunar is a fork and full technical overhaul of [astral](https://github.com/monlovesmango/astral) (astral.ninja), the original Nostr client by [monlovesmango](https://github.com/monlovesmango), which itself began as a fork of [Branle](https://github.com/fiatjaf/branle) by [fiatjaf](https://github.com/fiatjaf). The overhaul modernizes the stack (Vite, NDK, Pinia) and adds NIP-07/NIP-46 signers, NWC + lightning zaps (NIP-57), and more, while keeping astral's original design and aesthetic.
 
 ## Install the dependencies
 ```bash
