@@ -1,1 +1,9 @@
 // app global css in SCSS form
+
+// The Lunar accent is a light gold (#ecc865); Quasar gives filled accent
+// buttons white text, which is hard to read on yellow. Use dark text instead.
+// Only targets filled buttons (Quasar adds .bg-accent for those; flat/outline
+// use .text-accent and are unaffected).
+.q-btn.bg-accent {
+  color: #1f1f1f !important;
+}

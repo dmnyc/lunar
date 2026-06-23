@@ -72,7 +72,9 @@ export class AuthManager {
 
   async fetchNip46UserPubkey() {
     if (!this.nip46Signer) throw new Error('NIP-46 signer not initialized')
-    return fetchNip46UserPubkey(this.nip46Signer)
+    // Generous timeout: this is the single wait that covers the signer
+    // processing our connect + the user approving in the signer app.
+    return fetchNip46UserPubkey(this.nip46Signer, 60000)
   }
 
   // Pair the client with the remote signer before any other RPC. Some signers
@@ -81,24 +83,18 @@ export class AuthManager {
   // doesn't reliably send that, so we issue an explicit connect first, then
   // fall back to blockUntilReady for NDK's internal readiness state.
   async pairWithSigner(signerPubkey, secret) {
-    try {
-      const params = secret ? [signerPubkey, secret] : [signerPubkey]
-      await sendNip46Rpc(this.nip46Signer, 'connect', params, 60000)
-      // Paired. Do NOT also call blockUntilReady — it would wait (up to its
-      // timeout) for its own connect ack that never arrives, adding dead time
-      // on the client after the signer already approved.
-      return
-    } catch (e) {
-      console.warn('[NIP-46] explicit connect failed, falling back to blockUntilReady:', e)
-    }
-    try {
-      await Promise.race([
-        this.nip46Signer.blockUntilReady(),
-        this.timeout(15000, 'signer not ready')
-      ])
-    } catch (e) {
-      console.warn('[NIP-46] blockUntilReady timed out, will still try get_public_key:', e)
-    }
+    // Fire the NIP-46 connect (carrying the bunker secret so signers like Clave
+    // pair) but DON'T await its reply: many signers (Amber, Primal) never send
+    // a connect response, so awaiting it stalls for the full timeout. The
+    // following get_public_key is the real readiness signal — the signer
+    // answers it once it has processed connect (and the user approved). This is
+    // a single wait instead of two sequential ones, matching other clients.
+    const params = secret ? [signerPubkey, secret] : [signerPubkey]
+    sendNip46Rpc(this.nip46Signer, 'connect', params, 60000).catch((e) =>
+      console.warn('[NIP-46] connect rpc (non-blocking):', e?.message || e)
+    )
+    // brief settle so the connect event lands before get_public_key
+    await new Promise((r) => setTimeout(r, 250))
   }
 
   async initializeFromStorage() {

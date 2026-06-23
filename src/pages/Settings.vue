@@ -235,6 +235,7 @@ import ThePreferences from 'components/ThePreferences.vue'
 import { createMetaMixin } from 'quasar'
 import { utils } from 'lnurl-pay'
 import { getAuthManager } from '../nostr/authManager'
+import ndk from '../nostr/ndk'
 
 const metaData = {
   // sets document title
@@ -306,10 +307,22 @@ export default {
       if (this.$store.state.keys.priv) return this.hexToBech32(this.$store.state.keys.priv, 'nsec')
       return null
     },
-    // How the user signed in — drives the "Your keys" copy.
+    // How the user signed in — drives the "Your keys" copy. The live auth
+    // state can be null after a reload (or while a bunker reconnect is in
+    // flight), so fall back to the persisted method and the attached NDK
+    // signer before treating it as read-only.
     authMethod() {
       if (this.$store.state.keys.priv) return 'privateKey'
-      return getAuthManager()?.getState?.()?.authMethod || 'watch'
+      const live = getAuthManager()?.getState?.()?.authMethod
+      if (live) return live
+      try {
+        const stored = localStorage.getItem('astral_authMethod')
+        if (stored === 'nip46' || stored === 'nip07') return stored
+      } catch (_) { /* storage unavailable */ }
+      const signerName = ndk.signer?.constructor?.name || ''
+      if (signerName.includes('Nip46')) return 'nip46'
+      if (signerName.includes('Nip07')) return 'nip07'
+      return 'watch'
     },
     hasLnAddr() {
       return utils.isLightningAddress(this.metadata.lud06) || (utils.isLnurl(this.metadata.lud06) && this.lnurlToLnAddr(this.metadata.lud06))
