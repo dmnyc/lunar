@@ -489,5 +489,10 @@ export async function handleAddingProfileEventToCache(store, event) {
   if (store.state.profilesCache[event.pubkey] && event.created_at <= store.state.profilesCache[event.pubkey].created_at) return
   let metadata = metadataFromEvent(event)
   store.commit('addProfileToCache', metadata)
-  store.dispatch('useNip05', {metadata})
+  // NB: do NOT verify NIP-05 here. This runs for every cached profile, so on a
+  // feed or a follows list it fired an HTTP .well-known/nostr.json fetch per
+  // profile — hundreds of cross-origin requests at once (mostly CORS failures)
+  // that flooded the network and crashed mobile. NIP-05 verification is now
+  // on-demand only (Settings, search). The nip05 string still displays; it's
+  // just not network-verified in bulk.
 }

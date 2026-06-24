@@ -3,13 +3,14 @@ import * as helpersMixin from '../utils/mixin'
 import { utils } from 'lnurl-pay'
 
 export function namedProfiles(state, getters) {
-  return Object.entries(state.profilesCache).reduce(
-    (result, [pubkey, profile]) =>
-      getters.hasName(pubkey)
-        ? [...result, {...profile, pubkey}] // [..., { name, pubkey, nip05, ...}, ...]
-        : result,
-    []
-  )
+  // Build with push, not spread-in-reduce: `[...result, x]` copies the whole
+  // array every iteration (O(n²)) and with a large profile cache that froze/
+  // crashed the tab when the mention autocomplete read this.
+  const result = []
+  for (const [pubkey, profile] of Object.entries(state.profilesCache)) {
+    if (getters.hasName(pubkey)) result.push({ ...profile, pubkey })
+  }
+  return result
 }
 
 export function hasName(state) {

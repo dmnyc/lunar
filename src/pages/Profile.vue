@@ -155,7 +155,9 @@ export default defineComponent({
       tab: 'posts',
       followsEvent: null,
       follows: [],
-      followers: [],
+      followers: {},
+      followerCount: 0,
+      followersSeeded: false,
       // Render follows/followers a page at a time. Rendering the full list at
       // once (and fetching every profile) freezes mobile clients for accounts
       // that follow thousands of users, so we paginate with a "load more" button.
@@ -195,13 +197,14 @@ export default defineComponent({
 
   watch: {
     // The lists are virtualized, so fetch profiles only for the rendered slice
-    // (the @virtual-scroll handlers extend this as the user scrolls). Seed the
-    // first screenful when the list first arrives. useProfile dedupes.
+    // (the @virtual-scroll handlers extend this as the user scrolls). `follows`
+    // is reassigned only a handful of times (one kind-3 per revision), so seeding
+    // the first screenful here is cheap. We deliberately do NOT watch
+    // `followerKeys` — it recomputes on every streamed follower (thousands), and
+    // watching it produced a recompute storm that crashed mobile. Followers are
+    // seeded once from the stream callback instead.
     follows() {
       this.fetchUserRange(this.follows, 0, 15)
-    },
-    followerKeys() {
-      this.fetchUserRange(this.followerKeys, 0, 15)
     },
   },
 
@@ -226,6 +229,9 @@ export default defineComponent({
       this.loadingMore = true
       this.followsShown = this.pageSize
       this.followersShown = this.pageSize
+      this.followers = {}
+      this.followerCount = 0
+      this.followersSeeded = false
       let relays = Object.keys(this.$store.state.relays).length ? Object.keys(this.$store.state.relays) : Object.keys(this.$store.state.defaultRelays)
 
       let profile = await dbProfile(this.hexPubkey)
@@ -259,10 +265,19 @@ export default defineComponent({
           // watcher; we no longer fetch every follow up front.
         }
       })
-      this.sub.dbStreamFollowers = await dbStreamFollowers({author: this.hexPubkey, relays}, events => {
+      this.sub.dbStreamFollowers = await dbStreamFollowers({author: this.hexPubkey, relays, limit: 300}, events => {
         for (let event of events) {
+          if (this.followers[event.pubkey]) continue
+          if (this.followerCount >= 300) break // bound memory; followers are approximate
           this.followers[event.pubkey] = true
-          // Profiles for the visible page are fetched by the visibleFollowers watcher.
+          this.followerCount++
+        }
+        // Seed profiles for the first screenful once (the rest load on scroll via
+        // onFollowersScroll). We don't watch followerKeys — that recompute storm
+        // crashed mobile.
+        if (!this.followersSeeded && this.followerCount) {
+          this.followersSeeded = true
+          this.fetchUserRange(Object.keys(this.followers), 0, 15)
         }
       })
     },

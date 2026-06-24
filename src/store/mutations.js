@@ -1,3 +1,4 @@
+import { markRaw } from 'vue'
 import {getPublicKey, nip06, privateKeyFromSeedWords} from '../utils/ntcompat'
 // import Vuex from 'vuex'
 
@@ -84,8 +85,12 @@ export function addProfileToCache(
     state.profilesCacheLRU.splice(state.profilesCacheLRU.indexOf(pubkey), 1)
   }
 
-  // replace the metadata in cache
-  state.profilesCache[pubkey] = metadata
+  // replace the metadata in cache. markRaw keeps the profile object out of Vue's
+  // deep reactivity — the main subscription streams kind-0 for every follow, so
+  // for accounts with thousands of follows the deep-reactive proxies (and the
+  // per-field tracking) were a large, mobile-crashing memory cost. Reassigning
+  // the key still triggers re-render where a profile is shown.
+  state.profilesCache[pubkey] = markRaw(metadata)
 
   // adding to LRU
   if (pubkey === state.keys.pub) {
@@ -111,8 +116,9 @@ export function addEventToCache(
     state.eventsCacheLRU.splice(state.eventsCacheLRU.indexOf(id), 1)
   }
 
-  // replace the event in cache
-  state.eventsCache[id] = event
+  // replace the event in cache (markRaw — events are immutable, no need to pay
+  // for deep reactivity on every cached event).
+  state.eventsCache[id] = markRaw(event)
 
   // adding to LRU
   state.eventsCacheLRU.push(id)

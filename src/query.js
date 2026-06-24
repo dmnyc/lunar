@@ -235,8 +235,12 @@ export const dbStreamFollows = makeStream(({ author, relays }) => ({
   relays
 }))
 
-export const dbStreamFollowers = makeStream(({ author, relays }) => ({
-  filter: { kinds: [3], '#p': [author] },
+// Followers are kind-3 contact lists tagging the user. Those events are large
+// (each carries the follower's entire follow list — often thousands of tags), so
+// an unbounded query floods memory and crashes mobile. Cap it; the count is
+// necessarily approximate on nostr anyway.
+export const dbStreamFollowers = makeStream(({ author, relays, limit = 300 }) => ({
+  filter: { kinds: [3], '#p': [author], limit },
   relays
 }))
 

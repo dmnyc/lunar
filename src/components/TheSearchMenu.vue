@@ -74,13 +74,17 @@
       </div>
     <q-card-section v-if='$store.state.keys.pub' class='no-padding' style='overflow-y: auto;'>
       <div v-if='$store.state.follows.length' class='q-mt-xs q-pl-sm'>
-        <q-list v-if="!reordering">
-          <BaseUserCard
-            v-for="pubkey in $store.state.follows"
-            :pubkey="pubkey"
-            :key="pubkey"
-          />
-        </q-list>
+        <q-virtual-scroll
+          v-if="!reordering"
+          style="height: calc(100svh - 16rem); overflow-y: auto;"
+          :items="$store.state.follows"
+          :virtual-scroll-item-size="72"
+          :virtual-scroll-slice-size="12"
+          @virtual-scroll="onSearchFollowsScroll"
+          v-slot="{ item: pubkey }"
+        >
+          <BaseUserCard :pubkey="pubkey" :key="pubkey" />
+        </q-virtual-scroll>
         <Draggable
           v-else-if='reorderedFollows.length'
           v-model='reorderedFollows'
@@ -280,6 +284,15 @@ export default defineComponent({
     cancelReorder() {
       this.reordering = false
       this.reorderedFollows = []
+    },
+
+    // Fetch profiles only for the on-screen follows (the list is virtualized;
+    // rendering all 1000+ avatar cards at once instantly OOM-crashed mobile).
+    onSearchFollowsScroll({ from, to }) {
+      const follows = this.$store.state.follows
+      for (let i = Math.max(0, from); i <= Math.min(follows.length - 1, to + 4); i++) {
+        this.useProfile(follows[i])
+      }
     },
 
     useProfile(pubkey) {
