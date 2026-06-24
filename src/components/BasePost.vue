@@ -145,7 +145,21 @@
         />
         <BaseRelayRecommend v-else-if="event.kind === 2" :url="sanitize(event.content)" />
         <BaseUserCard v-else-if="event.kind === 0" :pubkey='event.pubkey' :header-mode='true' />
-        <pre v-else> {{ cleanEvent }} </pre>
+        <!-- kind 7: reaction — resolve custom :emoji: shortcodes from tags -->
+        <div v-else-if="event.kind === 7" class='reaction-display'>
+          <img
+            v-if='reactionEmoji.url'
+            :src='reactionEmoji.url'
+            :alt='reactionEmoji.name'
+            style='height: 2.5em; width: auto; vertical-align: middle;'
+          />
+          <span v-else class='text-h5'>{{ event.content || '+' }}</span>
+        </div>
+        <!-- kind 6: repost — content is the embedded event JSON; the repost renders
+             via the mentionEvents block below, so suppress raw JSON here -->
+        <template v-else-if="event.kind === 6" />
+        <!-- unknown kinds: show content text, not full raw JSON -->
+        <pre v-else style='font-size: .75rem; white-space: pre-wrap; overflow: auto; opacity: .7;'>{{ event.content }}</pre>
         <div
           v-if='!isEmbeded && (isQuote || isRepost)'
           class='reposts flex column q-pr-md'
@@ -187,12 +201,22 @@
               @click.stop
             >
           <!-- <div v-if='replyMode && replyMode !== "tip"' class='text-primary text-thin col q-pl-xs' style=' font-size: 90%; font-weight: 300;'>{{replyMode}}</div> -->
-              <q-tab  class='no-padding'>
+              <q-tab class='no-padding'>
                 <BaseButtonLightning
                   v-if='$store.getters.profileLud06(event.pubkey)'
                   :pubkey='event.pubkey'
                   :size='highlighted ? "md" : "sm"'
                 />
+              </q-tab>
+              <q-tab class='no-padding' @click.stop='sendReaction'>
+                <q-icon
+                  :name='hasReacted ? "favorite" : "favorite_border"'
+                  :color='hasReacted ? "pink-4" : ""'
+                  :size='highlighted ? "md" : "sm"'
+                >
+                  <q-tooltip>{{ hasReacted ? "reacted" : "react" }}</q-tooltip>
+                </q-icon>
+                <span v-if='reactionCount' class='reaction-count'>{{ reactionCount }}</span>
               </q-tab>
               <q-tab name='embed' class='no-padding'>
                 <q-icon name='link' >
@@ -293,6 +317,8 @@ import BaseMarkdown from 'components/BaseMarkdown.vue'
 import BaseRelayRecommend from 'components/BaseRelayRecommend.vue'
 import BaseButtonLightning from 'components/BaseButtonLightning.vue'
 import DOMPurify from 'dompurify'
+import { fetchReactionsFromCache } from '../nostr/reactions'
+import { useUserStore } from '../stores/user'
 
 export default defineComponent({
   name: 'BasePost',
@@ -328,6 +354,9 @@ export default defineComponent({
       resizing: false,
       trigger: 1,
       isLongForm: false,
+      reactionCount: 0,
+      hasReacted: false,
+      reactSending: false,
     }
   },
 
@@ -346,6 +375,16 @@ export default defineComponent({
       let pubkeyTags = this.event.tags.filter((tag) => tag[0] === 'p' && tag[1]).map((tag) => tag[1])
       if (pubkeyTags?.length) return pubkeyTags
       return null
+    },
+
+    reactionEmoji() {
+      const content = (this.event.content || '').trim()
+      const m = content.match(/^:([^:]+):$/)
+      if (m) {
+        const tag = (this.event.tags || []).find(([t, n]) => t === 'emoji' && n === m[1])
+        if (tag?.[2]) return { url: tag[2], name: m[1] }
+      }
+      return { url: null, name: null }
     },
 
     isRepost() {
@@ -416,6 +455,7 @@ export default defineComponent({
     this.calcConnectorValues()
     this.$emit('mounted')
     this.isLongForm = this.event.content.length > 600 || this.event.content.split(/\r\n|\r|\n/).length > 10
+    if (!this.isEmbeded && this.event.kind === 1) this.loadReactions()
   },
 
   activated() {
@@ -430,6 +470,38 @@ export default defineComponent({
   // },
 
   methods: {
+    async loadReactions() {
+      const myPub = this.$store.state.keys.pub
+      const reactions = await fetchReactionsFromCache(this.event.id)
+      this.reactionCount = reactions.length
+      this.hasReacted = myPub ? reactions.some((r) => r.pubkey === myPub) : false
+    },
+
+    async sendReaction() {
+      if (this.hasReacted || this.reactSending || !this.$store.state.keys.pub) return
+      this.reactSending = true
+      try {
+        const userStore = useUserStore()
+        await userStore.publishEvent({
+          pubkey: this.$store.state.keys.pub,
+          created_at: Math.floor(Date.now() / 1000),
+          kind: 7,
+          tags: [
+            ['e', this.event.id],
+            ['p', this.event.pubkey],
+            ['k', String(this.event.kind)],
+          ],
+          content: '+',
+        })
+        this.hasReacted = true
+        this.reactionCount++
+      } catch (err) {
+        this.$q.notify({ message: err?.message || 'Failed to send reaction.', color: 'negative' })
+      } finally {
+        this.reactSending = false
+      }
+    },
+
     childReplyConnectorStyle() {
       if (this.childReplyHeights?.length) {
         let height = this.headerHeight + this.postHeight + this.childReplyHeights.slice(0, -1).reduce((c, p) => c + p, 0)
@@ -496,6 +568,16 @@ export default defineComponent({
 })
 </script>
 <style lang="css" scoped>
+.reaction-count {
+  font-size: 0.7rem;
+  line-height: 1;
+  margin-left: 2px;
+  opacity: 0.85;
+}
+.reaction-display {
+  padding: 0.25rem 0;
+  text-align: center;
+}
 .post-padding {
   box-sizing: border-box;
   /*
