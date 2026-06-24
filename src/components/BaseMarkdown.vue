@@ -20,9 +20,7 @@
       <BaseLightningCard v-for='(invoice, index) in invoices' :key='index' :ln-string='invoice' class='gt-xs' row-or-column='row' style='padding: 1rem;'/>
     </div>
   </div>
-  <!-- <div v-if='links.length'>
-    <BaseLinkPreview v-for='(link, idx) of links' :key='idx' :url='link' />
-  </div> -->
+  <BaseLinkPreview v-if='links.length' :url='links[0]' />
 </template>
 
 <script>
@@ -34,6 +32,11 @@ import taskLists from 'markdown-it-task-lists'
 import emoji from 'markdown-it-emoji'
 import helpersMixin from '../utils/mixin'
 import BaseLightningCard from 'components/BaseLightningCard.vue'
+import BaseLinkPreview from 'components/BaseLinkPreview.vue'
+
+// Module-level ref so the markdown-it plugin (defined once, outside Vue) can
+// read per-render imeta data without needing a component instance.
+let _imeta = null
 
 const md = MarkdownIt({
   html: false,
@@ -70,8 +73,12 @@ md.use(subscript)
           ) {
             return `![](${m})`
           }
+          // NIP-92 imeta: treat URLs with a media MIME type as inline media
+          const meta = _imeta?.get(m)
+          if (meta?.mimeType && (meta.mimeType.startsWith('image/') || meta.mimeType.startsWith('video/'))) {
+            return `![${meta.alt || ''}](${m})`
+          }
         }
-
         return m
       })
     })
@@ -79,23 +86,16 @@ md.use(subscript)
     md.renderer.rules.image = (tokens, idx) => {
       let src = tokens[idx].attrs[[tokens[idx].attrIndex('src')]][1]
       let trimmed = src.split('?')[0]
-      // let classIndex = token.attrIndex('class')
-      if (
-        trimmed.endsWith('.gif') ||
-        trimmed.endsWith('.png') ||
-        trimmed.endsWith('.jpeg') ||
-        trimmed.endsWith('.jpg') ||
-        trimmed.endsWith('.webp') ||
-        trimmed.endsWith('.svg')
-      ) {
+      const imetaMime = _imeta?.get(src)?.mimeType || ''
+      const isImage = trimmed.match(/\.(gif|png|jpe?g|svg|webp)$/i) || imetaMime.startsWith('image/')
+      const isVideo = trimmed.match(/\.(mp4|webm|ogg)$/i) || imetaMime.startsWith('video/')
+      if (isImage) {
         return `<img src="${src}" async loading='lazy' style="max-width: 90%; max-height: 50vh;">`
-      } else if (
-        trimmed.endsWith('.mp4') ||
-        trimmed.endsWith('.webm') ||
-        trimmed.endsWith('.ogg')
-      ) {
+      } else if (isVideo) {
         return `<video src="${src}" controls async style="max-width: 90%; max-height: 50vh;"></video>`
       }
+      // Unknown type — fall back to a plain link
+      return `<a href="${src}" target="_blank" rel="noopener noreferrer">${src}</a>`
     }
 
     md.renderer.rules.link_open = function (tokens, idx, options, env, self) {
@@ -205,14 +205,14 @@ export default {
   emits: ['expand', 'resized'],
   components: {
     BaseLightningCard,
+    BaseLinkPreview,
   },
 
   data() {
     return {
       html: '',
-      // lnString: null,
-      invoices: []
-      // links: [],
+      invoices: [],
+      links: [],
     }
   },
 
@@ -224,6 +224,10 @@ export default {
     longForm: {
       type: Boolean,
       default: false
+    },
+    imeta: {
+      type: Map,
+      default: null,
     },
   },
 
@@ -250,8 +254,10 @@ export default {
 
   methods: {
     render() {
+      _imeta = this.imeta || null
       this.html = md.render(this.parsedContent) + this.$refs.append.innerHTML
-      // md.render(this.$refs.src.innerHTML) + this.$refs.append.innerHTML
+      _imeta = null
+
       this.$refs.html.querySelectorAll('img').forEach(img => {
         img.addEventListener('click', (e) => {
           e.stopPropagation()
@@ -262,16 +268,23 @@ export default {
           }
           this.$emit('resized')
         })
-        img.addEventListener('load', (e) => {
+        img.addEventListener('load', () => {
           this.$emit('resized')
         })
       })
-      // if (this.links.length === 0) {
-      //   this.$refs.html.querySelectorAll('a').forEach(link => this.links.push(link.href))
-      //   // if (links[0] && links[0].href) this.links.push(links[0].href)
-      //   // links.forEach(link => this.links.push(link.href))
-      //   console.log('links', this.links)
-      // }
+
+      // Collect plain-text links (non-media) for preview cards
+      if (this.links.length === 0) {
+        const mediaRe = /\.(gif|png|jpe?g|svg|webp|mp4|webm|ogg)(\?|$)/i
+        this.$refs.html.querySelectorAll('a[href]').forEach(a => {
+          const href = a.getAttribute('href')
+          if (!href || !href.match(/^https?:\/\//)) return
+          if (mediaRe.test(href.split('?')[0])) return
+          const imetaType = this.imeta?.get(href)?.mimeType || ''
+          if (imetaType.startsWith('image/') || imetaType.startsWith('video/')) return
+          if (!this.links.includes(href)) this.links.push(href)
+        })
+      }
     },
 
     handleClicks(event) {

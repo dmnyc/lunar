@@ -140,6 +140,7 @@
           v-if="event.kind === 1"
           :content='event.interpolated.text'
           :long-form='isLongForm'
+          :imeta='eventImeta'
           @expand='isLongForm = !isLongForm'
           @resized='calcConnectorValues(10)'
         />
@@ -361,6 +362,26 @@ export default defineComponent({
   },
 
   computed: {
+    // NIP-92 imeta: Map<url, {mimeType, alt}> parsed from ["imeta", "url <u>", "m <mime>", "alt <text>"] tags
+    eventImeta() {
+      const tags = this.event.tags || []
+      const imetaTags = tags.filter(t => t[0] === 'imeta')
+      if (!imetaTags.length) return null
+      const map = new Map()
+      for (const tag of imetaTags) {
+        let url = null, mimeType = null, alt = null
+        for (let i = 1; i < tag.length; i++) {
+          const [key, ...rest] = tag[i].split(' ')
+          const val = rest.join(' ')
+          if (key === 'url') url = val
+          else if (key === 'm') mimeType = val
+          else if (key === 'alt') alt = val
+        }
+        if (url) map.set(url, { mimeType, alt })
+      }
+      return map.size ? map : null
+    },
+
     // NIP-89 client tag: ["client", "<name>", ...] — shown as "via <name>"
     clientName() {
       const tag = (this.event.tags || []).find((t) => t[0] === 'client' && t[1])
