@@ -41,6 +41,16 @@ export function isValidEvent(event) {
   return true
 }
 
+const SIGNER_TIMEOUT_MS = 30_000
+const SIGNER_TIMEOUT_MSG = 'Signer timed out — check your extension or sign in again.'
+
+function withSignerTimeout(promise) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(SIGNER_TIMEOUT_MSG)), SIGNER_TIMEOUT_MS))
+  ])
+}
+
 export async function signAsynchronously(event, store) {
   event.id = getEventHash(event)
 
@@ -53,13 +63,13 @@ export async function signAsynchronously(event, store) {
   // Remote/extension signer established by the AuthManager (NIP-07 or NIP-46).
   // NDK routes to whichever signer is active; this covers both uniformly.
   if (ndk.signer) {
-    event.sig = await ndk.signer.sign(event)
+    event.sig = await withSignerTimeout(ndk.signer.sign(event))
     return event
   }
 
   // Fallback: a raw NIP-07 extension that was never wired through the signer.
   if (window.nostr) {
-    let signatureOrEvent = await window.nostr.signEvent(event)
+    let signatureOrEvent = await withSignerTimeout(window.nostr.signEvent(event))
     switch (typeof signatureOrEvent) {
       case 'string':
         event.sig = signatureOrEvent

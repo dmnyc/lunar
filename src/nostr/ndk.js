@@ -14,10 +14,10 @@ import { LocalStorage } from 'quasar'
 export const DEFAULT_RELAYS = [
   'wss://relay.damus.io',
   'wss://nos.lol',
-  'wss://relay.nostr.band',
   'wss://relay.primal.net',
   'wss://nostr.wine',
-  'wss://offchain.pub'
+  'wss://offchain.pub',
+  'wss://relay.nos.social'
 ]
 
 // Outbox/discovery relays used for resolving profiles and relay lists.

@@ -45,6 +45,8 @@ function insertDesc(ids, id, at) {
  * @param {object} opts
  * @param {number[]} opts.kinds       event kinds to subscribe (default [1])
  * @param {string[]|null} opts.authors author pubkeys, or null for global
+ * @param {object|null} opts.baseFilter if set, used as the NIP-01 filter base
+ *   instead of building one from kinds+authors. Useful for tag filters (#p, #t).
  * @param {string[]|null} opts.relays  explicit relay urls, or null for ndk default
  * @param {number} opts.pageSize       events per page (default 50)
  * @param {number} opts.pendingCap     max buffered live notes (default 500)
@@ -54,6 +56,7 @@ function insertDesc(ids, id, at) {
 export function createFeed({
   kinds = [1],
   authors = null,
+  baseFilter = null,
   relays = null,
   pageSize = 50,
   pendingCap = 500,
@@ -89,6 +92,7 @@ export function createFeed({
   }
 
   function buildFilter(extra) {
+    if (baseFilter) return { ...baseFilter, ...extra }
     const filter = { kinds, ...extra }
     if (authors && authors.length) filter.authors = authors
     return filter

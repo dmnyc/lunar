@@ -48,8 +48,11 @@ export default function (store) {
       if (sub.streamMainIncomingMessages) sub.streamMainIncomingMessages.update({ authors: [store.state.keys.pub], relays })
       else sub.streamMainIncomingMessages = await streamMainIncomingMessages({ authors: [store.state.keys.pub], relays },
         events => {
-          if (streamMainIncomingMessagesEose) for (let event of events) setUnreadMessages(event.pubkey)
-          else streamMainIncomingMessagesPeers[event.pubkey] = true
+          for (const event of events) {
+            if (!event) continue
+            if (streamMainIncomingMessagesEose) setUnreadMessages(event.pubkey)
+            else streamMainIncomingMessagesPeers[event.pubkey] = true
+          }
         },
         () => {
           if (!streamMainIncomingMessagesEose) {
