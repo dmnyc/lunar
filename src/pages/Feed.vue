@@ -1,88 +1,59 @@
 <template>
-  <q-page >
-  <!-- <div id='feed-scroll' style='max-height: 700px; overflow: auto;'> -->
-    <!-- <div> -->
-      <!-- <q-infinite-scroll @load='loadMore()' :offset='500' scroll-target='#feed-scroll'> -->
-      <BaseHeader :separator='false'>
-        <div class='flex row justify-start items-center' style='gap: 1rem;'>
-          <div>{{ $t('feed') }}</div>
-          <q-select borderless v-model="feedName" :options="['follows', 'global', 'bots']" />
-        </div>
-      </BaseHeader>
-      <BaseButtonLoadMore
-        v-if='unreadFeed.length'
-        :loading-more='loadingUnread'
-        :label='"load " + unreadFeed.length + " unread"'
-        @click='loadUnread'
-      />
-      <q-virtual-scroll
-        :items='items'
-        :virtual-scroll-item-size='250'
-        @virtual-scroll='onVirtualScroll'
-        v-slot='{ item, index }'
-      >
-        <div :key='index' class='feed-item'>
-          <BasePostThread
-            :events="item"
-            class='full-width'
-            fetch-root-reply
-            @add-event='processEvent'
-          />
-        </div>
-      </q-virtual-scroll>
-          <div v-if='loadingMore' class='row justify-center q-py-sm'>
-            <q-spinner-orbit color="accent" size='md' />
-          </div>
-      <!-- </q-infinite-scroll> -->
-      <!-- </div> -->
-    <!-- </div> -->
-      <!-- <q-tabs
-        v-model="tab"
-        dense
-        outline
-        align="left"
-        active-color='accent'
-        :breakpoint="0"
-      >
-        <q-tab name="follows" label='follows' />
-        <q-tab name="global" label='global' />
-        <q-tab name="AI" label='AI' />
-        <q-tab name="bots" label='bots' />
-      </q-tabs>
-    </div>
-    <div v-if='tab === "AI"' class='flex row no-wrap items-center' style='border: 1px solid var(--q-accent); border-radius: .5rem; padding: .5rem; margin: .5rem; gap: .5rem;'>
-      <q-icon name='info' color='accent' size='sm'/>
-      <div>to chat with the AI bot create a new post and mention it by typing '@gpt3' and selecting the AI bot from the user list</div>
-    </div>
+  <q-page>
+    <BaseHeader :separator='false'>
+      <div class='flex row justify-start items-center' style='gap: 1rem;'>
+        <div>{{ $t('feed') }}</div>
+        <q-select borderless v-model="feedName" :options="['follows', 'global']" />
+      </div>
+    </BaseHeader>
+
     <BaseButtonLoadMore
-      v-if='unreadFeed[tab].length'
-      :loading-more='loadingUnread'
-      :label='"load " + unreadFeed[tab].length + " unread"'
-      @click='loadUnread'
+      v-if='pendingCount'
+      :loading-more='false'
+      :label='"load " + pendingCount + " new"'
+      @click='showNew'
     />
-    <BasePostThread v-for='(item, index) in items' :key='index' :events="item" class='full-width' fetch-root-reply @add-event='processEvent'/>
-    <BaseButtonLoadMore
-      :loading-more='loadingMore'
-      label='load more'
-      @click='loadMore(tab)'
-    /> -->
+
+    <q-virtual-scroll
+      ref='vscroll'
+      class='feed-scroll'
+      :items='items'
+      :virtual-scroll-item-size='250'
+      :virtual-scroll-slice-size='8'
+      :virtual-scroll-slice-ratio-before='2'
+      :virtual-scroll-slice-ratio-after='2'
+      @virtual-scroll='onVirtualScroll'
+      v-slot='{ item, index }'
+    >
+      <div :key='item' class='feed-item'>
+        <BasePost
+          :event='getEvent(item)'
+          position='standalone'
+          @click.stop='toEvent(item)'
+        />
+      </div>
+    </q-virtual-scroll>
+
+    <div v-if='loading' class='row justify-center q-py-md'>
+      <q-spinner-orbit color='accent' size='md' />
+    </div>
+    <div v-else-if='reachedEnd && items.length' class='text-center text-caption text-grey q-py-md'>
+      — end of feed —
+    </div>
   </q-page>
 </template>
 
 <script>
-import { defineComponent } from 'vue'
+import { defineComponent, markRaw } from 'vue'
 import helpersMixin from '../utils/mixin'
-import {addToThread} from '../utils/threads'
-import {isValidEvent} from '../utils/event'
-import {getFeed, dbFollows} from '../query'
+import { isValidEvent } from '../utils/event'
+import { createFeed } from '../nostr/feedEngine'
+import BasePost from 'components/BasePost.vue'
 import BaseButtonLoadMore from 'components/BaseButtonLoadMore.vue'
 import { createMetaMixin } from 'quasar'
 
 const metaData = {
-  // sets document title
   title: 'lunar',
-
-  // meta tags
   meta: {
     description: { name: 'description', content: 'decentralized social media feed built on Nostr' },
     keywords: { name: 'keywords', content: 'nostr decentralized social media' },
@@ -95,274 +66,142 @@ export default defineComponent({
   mixins: [helpersMixin, createMetaMixin(metaData)],
 
   components: {
+    BasePost,
     BaseButtonLoadMore,
   },
 
-  watch: {
-    feedName(curr, prev) {
-      if (curr !== prev) {
-        this.stop()
-        this.loadMore()
-      }
-    }
-  },
-
-  // props: {
-  //   lookingAround: {
-  //     type: Boolean,
-  //     default: false,
-  //   }
-  // },
-
   data() {
     return {
-      feed: [],
-      // feed: {
-      //   follows: [],
-      //   global: [],
-      //   AI: [],
-      //   bots: []
-      // },
-      // feedCounts: {
-      //   follows: 100,
-      //   global: 100,
-      //   AI: 100,
-      //   bots: 100
-      // },
-      unreadFeed: [],
-      // unreadFeed: {
-      //   follows: [],
-      //   global: [],
-      //   AI: [],
-      //   bots: []
-      // },
-      feedSet: new Set(),
-      bots: [],
-      // follows: [],
-      botTracker: '29f63b70d8961835b14062b195fc7d84fa810560b36dde0749e4bc084f0f8952',
-      loadingMore: true,
-      loadingUnread: false,
-      // tab: 'follows',
       feedName: 'follows',
-      // The 10s refresh poll keeps appending to unreadFeed for as long as the
-      // page stays open; cap it so an idle-but-open feed can't leak unbounded.
-      // (The visible feed itself stays unbounded for endless scroll — its DOM is
-      // bounded by q-virtual-scroll, which only mounts the visible slice.)
-      maxUnreadLength: 200,
-      // q-virtual-scroll bounds the DOM, but the underlying feed array (reactive
-      // event proxies + parsed content + image decodes) still grows as you load
-      // more. Desktop has the headroom; mobile Safari/Chrome have a tight per-tab
-      // memory ceiling and OOM-crash ("a problem repeatedly occurred"). On mobile
-      // we cap the array so endless scroll stops growing it; set in mounted() once
-      // $q.platform is available.
-      maxFeedLength: Infinity,
-      since: Math.round(Date.now() / 1000),
-      until: Math.round(Date.now() / 1000),
-      // profilesUsed: new Set(),
-      // index: 0,
-      lastLoaded: Math.round(Date.now() / 1000),
-      refreshInterval: null,
+      // The engine is held as a non-reactive instance property (assigned in
+      // build(), never declared in data) so Vue doesn't wrap its internals; its
+      // shallowRefs are still tracked by the computed accessors below.
+      tick: 0, // bumped to re-evaluate the ref-backed computeds
     }
   },
 
   computed: {
     items() {
-      return this.feed
-    }
+      void this.tick
+      return this.engine ? this.engine.timeline.value : []
+    },
+    pendingCount() {
+      void this.tick
+      return this.engine ? this.engine.pending.value.length : 0
+    },
+    loading() {
+      void this.tick
+      return this.engine ? this.engine.loading.value : false
+    },
+    reachedEnd() {
+      void this.tick
+      return this.engine ? this.engine.reachedEnd.value : false
+    },
   },
 
-  async mounted() {
-    // this.loadMore(this.tab)
-    //   if (this.loadingMore) this.loadingMore = false
-
-    // this.bots = await this.getFollows(this.botTracker)
-    // this.follows = this.$store.state.follows
-
-    // if (this.follows.length === 0) {
-    //   this.tab = 'global'
-    // }
-    if (this.$store.state.follows.length === 0) {
-      this.feedName = 'global'
-    }
-    // Bound the in-memory feed on mobile to avoid OOM tab crashes; desktop keeps
-    // unbounded endless scroll.
-    if (this.$q.platform.is.mobile) this.maxFeedLength = 250
-    this.loadMore()
-
-    // this.refreshInterval = setInterval(async () => {
-    //   let relays = Object.keys(this.$store.state.relays).length ? Object.keys(this.$store.state.relays) : Object.keys(this.$store.state.defaultRelays)
-    //   // let results = await dbFeed(this.since)
-    //   let results = await getFeed({ relays, since: this.since, limit: 500 })
-    //   // let feed = this.feed.global.length ? this.unreadFeed : this.feed
-    //   if (results) for (let event of results) this.processEvent(event)
-    //   // for (let feedName of Object.keys(this.feed)) {
-    //   //   this.feed[feed] = this.feed[feed].concat(feed[feed])
-    //   // }
-    //   // if (this.loadingMore) this.loadingMore = false
-    //   this.since = Math.round(Date.now() / 1000)
-    // }, 10000)
+  watch: {
+    feedName(curr, prev) {
+      if (curr !== prev) this.build()
+    },
   },
 
-  async beforeUnmount() {
-    this.stop()
+  mounted() {
+    this.build()
+    this._onVisibility = () => {
+      if (!this.engine) return
+      if (document.hidden) this.engine.stop()
+      else this.engine.resume()
+    }
+    document.addEventListener('visibilitychange', this._onVisibility)
+  },
+
+  beforeUnmount() {
+    if (this._onVisibility) document.removeEventListener('visibilitychange', this._onVisibility)
+    if (this.engine) this.engine.destroy()
   },
 
   methods: {
-    async loadMore() {
-      // Stop growing the feed once it hits the (mobile) cap — endless scroll would
-      // otherwise keep appending older threads and eventually crash the tab.
-      if (this.feed.length >= this.maxFeedLength) {
-        this.loadingMore = false
-        return
+    relays() {
+      const r = Object.keys(this.$store.state.relays)
+      return r.length ? r : Object.keys(this.$store.state.defaultRelays)
+    },
+
+    build() {
+      if (this.engine) this.engine.destroy()
+      const follows = this.$store.state.follows
+      const useFollows = this.feedName === 'follows' && follows.length
+      if (this.feedName === 'follows' && !follows.length) this.feedName = 'global'
+
+      // markRaw keeps the engine object (and its closures/Map) out of Vue's
+      // reactivity; we drive re-renders manually via tick + the ref computeds.
+      this.engine = markRaw(createFeed({
+        kinds: [1, 2],
+        authors: useFollows ? follows : null,
+        relays: this.relays(),
+        pageSize: 50,
+        enrich: (e) => this.interpolateEventMentions(e),
+        valid: isValidEvent,
+      }))
+
+      // Vue's reactivity already tracks the shallowRefs inside the computeds, but
+      // a markRaw'd container can mask that on some paths — a cheap watcher on the
+      // refs bumps `tick` so the template always reflects engine state.
+      this._bumps = [
+        this.engine.timeline, this.engine.pending, this.engine.loading, this.engine.reachedEnd
+      ]
+      this.$watch(() => this._bumps.map((r) => r.value), () => { this.tick++ }, { deep: false })
+
+      this.engine.start().then(() => this.ensureProfiles(0, 20))
+    },
+
+    getEvent(id) {
+      return this.engine ? this.engine.getEvent(id) : null
+    },
+
+    // Request profiles for the on-screen author range only (the existing Vuex
+    // useProfile action batches in groups of 50 and dedups against the cache).
+    ensureProfiles(from, to) {
+      if (!this.engine) return
+      const ids = this.engine.timeline.value
+      for (let i = Math.max(0, from); i <= Math.min(ids.length - 1, to); i++) {
+        const e = this.engine.getEvent(ids[i])
+        if (e) this.$store.dispatch('useProfile', { pubkey: e.pubkey })
       }
-      this.loadingMore = true
-      let relays = Object.keys(this.$store.state.relays).length ? Object.keys(this.$store.state.relays) : Object.keys(this.$store.state.defaultRelays)
-
-      // if (this.items.length < this.feed[this.tab].length) {
-      //   console.log('just increased counts')
-      //   this.feedCounts[this.tab] += 100
-      //   this.loadingMore = false
-      //   return
-      // }
-
-      let loadedFeed = []
-      // let lastThread = this.feed[feedName][this.feed[feedName].length - 1]
-      // let until = lastThread ? lastThread[lastThread.length - 1].latest_created_at : Math.round(Date.now() / 1000)
-      // let loadedFeed = []
-      let settings = { relays, until: this.until + (5 * 60), limit: 100 }
-      if (this.feedName === 'follows') settings.authors = this.$store.state.follows
-      else if (this.feedName === 'bots') settings.authors = this.bots
-
-      let results = await getFeed(settings)
-      if (results) for (let event of results) this.processEvent(event, loadedFeed)
-      this.feed = this.feed.concat(loadedFeed)
-      // for (let feedName of Object.keys(this.feed)) {
-      //   this.feed[feedName] = this.feed[feedName].concat(loadedFeed[feedName])
-      // }
-
-        // console.log('loaded feed', results, this.feed, this.counts)
-
-      // this.loadingMore = false
-
-     if (!this.refreshInterval) this.refreshInterval = setInterval(async () => {
-      // let results = await dbFeed(this.since)
-      let settings = { relays, since: this.since, limit: 100 }
-      if (this.feedName === 'follows') settings.authors = this.$store.state.follows
-      else if (this.feedName === 'bots') settings.authors = this.bots
-      let results = await getFeed(settings)
-      // let feed = this.feed.global.length ? this.unreadFeed : this.feed
-      if (results) for (let event of results) this.processEvent(event)
-      // for (let feedName of Object.keys(this.feed)) {
-      //   this.feed[feed] = this.feed[feed].concat(feed[feed])
-      // }
-      this.since = Math.round(Date.now() / 1000)
-      if (!this.bots.length) this.bots = await this.getFollows(this.botTracker)
-
-      if (this.loadingMore) this.loadingMore = false
-    }, 10000)
-    },
-    stop() {
-      if (this.refreshInterval) clearInterval(this.refreshInterval)
-      this.feed = []
-      this.unreadFeed = []
-      this.feedSet = new Set()
-      this.since = Math.round(Date.now() / 1000)
-      this.until = Math.round(Date.now() / 1000)
-      // profilesUsed: new Set(),
-      // index: 0,
-      this.lastLoaded = Math.round(Date.now() / 1000)
-      this.refreshInterval = null
     },
 
-    loadUnread() {
-      this.loadingUnread = true
-      setTimeout(() => {
-        this.feed = this.unreadFeed.concat(this.feed)
-        // Newest are now at the top; drop the oldest off the bottom to stay within
-        // the cap (the user is viewing the top after loading unread).
-        if (this.feed.length > this.maxFeedLength) this.feed = this.feed.slice(0, this.maxFeedLength)
-        this.unreadFeed = []
-        this.lastLoaded = Math.round(Date.now() / 1000)
-        this.loadingUnread = false
-      }, 100)
+    onVirtualScroll({ from, to }) {
+      this.ensureProfiles(from, to + 2)
+      if (this.engine && to >= this.items.length - 6) this.engine.loadMore()
     },
 
-    processEvent(event, activeFeed = this.feed, unreadFeed = this.unreadFeed) {
-      if (!isValidEvent(event)) return
-      if (this.feedSet.has(event.id)) return
-      // if (event.created_at < this.since) return
-      this.feedSet.add(event.id)
-      this.interpolateEventMentions(event)
-      this.useProfile(event.pubkey)
-      if (this.until > event.created_at) this.until = event.created_at
-      // this.debouncedAddToThread([event])
-      let feed
-      if (event.pubkey === this.$store.state.keys.pub) feed = activeFeed
-      else feed = (event.created_at > this.lastLoaded) ? unreadFeed : activeFeed
-      if (this.feedName === 'global' && (this.isBot(event) || this.isAI(event))) return
-      // Don't let the unread buffer grow without bound while the feed sits open.
-      if (feed === unreadFeed && unreadFeed.length >= this.maxUnreadLength) return
-      addToThread(feed, JSON.parse(JSON.stringify(event)), 'feed', event.pubkey !== this.$store.state.keys.pub)
-
-      // if (this.$store.state.follows.includes(event.pubkey)) addToThread(feed.follows, JSON.parse(JSON.stringify(event)), 'feed', event.pubkey !== this.$store.state.keys.pub)
-      // if (this.isBot(event)) addToThread(feed.bots, JSON.parse(JSON.stringify(event)), 'feed', event.pubkey !== this.$store.state.keys.pub)
-      // if (this.isAI(event)) addToThread(this.feed.AI, JSON.parse(JSON.stringify(event)), 'feed', event.pubkey !== this.$store.state.keys.pub)
-      // else addToThread(feed.global, JSON.parse(JSON.stringify(event)), 'feed', event.pubkey !== this.$store.state.keys.pub)
+    showNew() {
+      if (this.engine) this.engine.showNew()
+      const vs = this.$refs.vscroll
+      if (vs && vs.scrollTo) vs.scrollTo(0)
     },
-
-    async getFollows(pubkey) {
-      let events = await dbFollows(pubkey)
-      if (!events?.length) return []
-      let event = events[0]
-      return event.tags
-        .filter(([t, v]) => t === 'p' && v)
-        .map(([_, v]) => v)
-    },
-
-    useProfile(pubkey) {
-      // if (this.profilesUsed.has(pubkey)) return
-
-      // this.profilesUsed.add(pubkey)
-      this.$store.dispatch('useProfile', {pubkey})
-    },
-
-    isBot(event) {
-      if (this.bots.includes(event.pubkey)) return true
-      if (event.content.includes('https://www.minds.com/newsfeed/')) return true
-      return false
-    },
-
-    isAI(event) {
-      if (event.pubkey === '5c10ed0678805156d39ef1ef6d46110fe1e7e590ae04986ccf48ba1299cb53e2') return true
-      if (event.tags.findIndex(([t, v]) => t === 'p' && v === '5c10ed0678805156d39ef1ef6d46110fe1e7e590ae04986ccf48ba1299cb53e2') >= 0) return true
-      return false
-    },
-
-    onVirtualScroll({ to }) {
-      // Load older threads as the rendered window approaches the end of the
-      // list. q-virtual-scroll only mounts the visible slice, so the DOM stays
-      // bounded no matter how far the user scrolls.
-      if (this.loadingMore) return
-      if (to >= this.items.length - 6) this.loadMore()
-    },
-
-    // printDetails(details) {
-    //   console.log('details', details)
-    // },
-
-    // itemKey(item) {
-    //   return item[0].id
-    // }
-  }
+  },
 })
 </script>
-<style lang='css' scoped>
-.q-tabs {
-  border-bottom: 1px solid var(--q-accent)
+
+<style lang='scss'>
+.feed-item {
+  width: 100%;
 }
 
-.q-page::-webkit-scrollbar {
-  width: 0px;
+// Give the virtual scroller its own bounded scroll area so q-virtual-scroll
+// reliably virtualizes (only the visible slice is mounted). Without this it
+// falls back to the layout's window scroll, can't bound the rendered set, and
+// mounts every loaded BasePost — which crashes mobile Safari on a long feed.
+.feed-scroll {
+  // A bounded-height scroll container is REQUIRED for q-virtual-scroll to
+  // virtualize here (window-scroll auto-detection renders every item — verified:
+  // 300 items => 300 mounted, 13k DOM nodes). With this, only the visible slice
+  // mounts (~15). Uses svh (small viewport height, stable across iOS browser-UI
+  // and zoom changes) and omits -webkit-overflow-scrolling:touch, whose momentum
+  // layer crashes iOS Safari when pinch-zooming inside a nested scroller.
+  height: calc(100svh - 7rem);
+  overflow-y: auto;
+  overflow-anchor: none;
+  padding-bottom: 4rem;
 }
-
 </style>

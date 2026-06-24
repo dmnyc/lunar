@@ -334,13 +334,6 @@ export default {
 
   mounted() {
     if (!this.$store.state.keys.pub) this.$router.push('/')
-    if (this.$store.state.keys.pub && this.$route.params.initUser) {
-          nextTick(() => {
-            setTimeout(() => {
-              this.keysDialog = true
-            }, 1000)
-          })
-    }
 
     this.unsubscribe = this.$store.subscribe((mutation, state) => {
       switch (mutation.type) {

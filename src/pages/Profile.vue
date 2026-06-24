@@ -67,40 +67,32 @@
 
       <q-tab-panel name="follows" class='no-padding'>
         <div v-if="!follows.length">{{ $t('noFollows') }}</div>
-        <div v-else class="flex column relative">
-          <div class='q-pl-sm'>
-            <BaseUserCard
-              v-for="(pubkey) in visibleFollows"
-              :key="pubkey"
-              :pubkey="pubkey"
-              :show-following='true'
-            />
-          </div>
-          <BaseButtonLoadMore
-            v-if='follows.length > visibleFollows.length'
-            :loading-more='false'
-            @click='loadMoreFollows'
-          />
-        </div>
+        <q-virtual-scroll
+          v-else
+          class='user-list-scroll q-pl-sm'
+          :items='follows'
+          :virtual-scroll-item-size='72'
+          :virtual-scroll-slice-size='12'
+          @virtual-scroll='onFollowsScroll'
+          v-slot='{ item: pubkey }'
+        >
+          <BaseUserCard :key='pubkey' :pubkey='pubkey' :show-following='true' />
+        </q-virtual-scroll>
       </q-tab-panel>
 
       <q-tab-panel name="followers" class='no-padding'>
         <div v-if="!followerKeys.length">{{ $t('noFollowers') }}</div>
-        <div v-else class="flex column relative">
-          <div class='q-pl-sm'>
-            <BaseUserCard
-              v-for="(pubkey) in visibleFollowers"
-              :key="pubkey"
-              :pubkey="pubkey"
-              :show-following='true'
-            />
-          </div>
-          <BaseButtonLoadMore
-            v-if='followerKeys.length > visibleFollowers.length'
-            :loading-more='false'
-            @click='loadMoreFollowers'
-          />
-        </div>
+        <q-virtual-scroll
+          v-else
+          class='user-list-scroll q-pl-sm'
+          :items='followerKeys'
+          :virtual-scroll-item-size='72'
+          :virtual-scroll-slice-size='12'
+          @virtual-scroll='onFollowersScroll'
+          v-slot='{ item: pubkey }'
+        >
+          <BaseUserCard :key='pubkey' :pubkey='pubkey' :show-following='true' />
+        </q-virtual-scroll>
       </q-tab-panel>
 
       <q-tab-panel name="relays" class='no-padding'>
@@ -202,13 +194,14 @@ export default defineComponent({
   },
 
   watch: {
-    // Only fetch profiles for the cards we actually render. useProfile dedupes
-    // via profilesUsed, so re-running as the visible slice grows is cheap.
-    visibleFollows(pubkeys) {
-      pubkeys.forEach(pubkey => this.useProfile(pubkey))
+    // The lists are virtualized, so fetch profiles only for the rendered slice
+    // (the @virtual-scroll handlers extend this as the user scrolls). Seed the
+    // first screenful when the list first arrives. useProfile dedupes.
+    follows() {
+      this.fetchUserRange(this.follows, 0, 15)
     },
-    visibleFollowers(pubkeys) {
-      pubkeys.forEach(pubkey => this.useProfile(pubkey))
+    followerKeys() {
+      this.fetchUserRange(this.followerKeys, 0, 15)
     },
   },
 
@@ -293,12 +286,20 @@ export default defineComponent({
       }
     },
 
-    loadMoreFollows() {
-      this.followsShown += this.pageSize
+    // Fetch profiles for a slice of a pubkey list (used by the virtualized
+    // follows/followers lists — only the visible range, not the whole list).
+    fetchUserRange(list, from, to) {
+      for (let i = Math.max(0, from); i <= Math.min(list.length - 1, to); i++) {
+        this.useProfile(list[i])
+      }
     },
 
-    loadMoreFollowers() {
-      this.followersShown += this.pageSize
+    onFollowsScroll({ from, to }) {
+      this.fetchUserRange(this.follows, from, to + 4)
+    },
+
+    onFollowersScroll({ from, to }) {
+      this.fetchUserRange(this.followerKeys, from, to + 4)
     },
 
     useProfile(pubkey) {
@@ -355,5 +356,14 @@ export default defineComponent({
 }
 .q-tab-panels {
   background: var(--q-background);
+}
+/* Bounded scroll container so q-virtual-scroll virtualizes the follows/followers
+   lists (only the visible slice mounts). Without a height it renders every card,
+   which OOM-crashes mobile Safari — the same failure the feed had. svh + no
+   momentum layer keeps pinch-zoom stable. */
+.user-list-scroll {
+  height: calc(100svh - 12rem);
+  overflow-y: auto;
+  overflow-anchor: none;
 }
 </style>
