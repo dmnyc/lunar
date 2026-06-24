@@ -43,6 +43,22 @@ module.exports = configure(async function (/* ctx */) {
       vueRouterMode: 'history', // available values: 'hash', 'history'
       publicPath: '/',
 
+      // Keep quotes on attribute values in index.html. Quasar's default minify
+      // sets removeAttributeQuotes:true, producing `<meta property=og:image
+      // content=https://lunar.ninja/social_image.jpg>`. Robust crawlers (FB/
+      // Twitter/Discord) parse that fine, but stricter/regex-based OG parsers in
+      // some nostr clients (e.g. wisp) expect `content="..."` and silently fail —
+      // so they fall back to <title> + domain and never see og:image (no social
+      // card image). Disabling quote removal makes the OG tags universally
+      // parseable. (Other defaults preserved.)
+      htmlMinifyOptions: {
+        removeComments: true,
+        collapseWhitespace: true,
+        removeAttributeQuotes: false,
+        collapseBooleanAttributes: true,
+        removeScriptTypeAttributes: true
+      },
+
       // The 2022 codebase imports .vue components without the extension (the
       // old webpack resolver allowed it). Teach Vite's resolver to do the same
       // so those imports keep working.
