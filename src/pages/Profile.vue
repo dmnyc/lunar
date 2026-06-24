@@ -67,40 +67,32 @@
 
       <q-tab-panel name="follows" class='no-padding'>
         <div v-if="!follows.length">{{ $t('noFollows') }}</div>
-        <div v-else class="flex column relative">
-          <div class='q-pl-sm'>
-            <BaseUserCard
-              v-for="(pubkey) in visibleFollows"
-              :key="pubkey"
-              :pubkey="pubkey"
-              :show-following='true'
-            />
-          </div>
-          <BaseButtonLoadMore
-            v-if='follows.length > visibleFollows.length'
-            :loading-more='false'
-            @click='loadMoreFollows'
-          />
-        </div>
+        <q-virtual-scroll
+          v-else
+          class='user-list-scroll q-pl-sm'
+          :items='follows'
+          :virtual-scroll-item-size='72'
+          :virtual-scroll-slice-size='12'
+          @virtual-scroll='onFollowsScroll'
+          v-slot='{ item: pubkey }'
+        >
+          <BaseUserCard :key='pubkey' :pubkey='pubkey' :show-following='true' />
+        </q-virtual-scroll>
       </q-tab-panel>
 
       <q-tab-panel name="followers" class='no-padding'>
         <div v-if="!followerKeys.length">{{ $t('noFollowers') }}</div>
-        <div v-else class="flex column relative">
-          <div class='q-pl-sm'>
-            <BaseUserCard
-              v-for="(pubkey) in visibleFollowers"
-              :key="pubkey"
-              :pubkey="pubkey"
-              :show-following='true'
-            />
-          </div>
-          <BaseButtonLoadMore
-            v-if='followerKeys.length > visibleFollowers.length'
-            :loading-more='false'
-            @click='loadMoreFollowers'
-          />
-        </div>
+        <q-virtual-scroll
+          v-else
+          class='user-list-scroll q-pl-sm'
+          :items='followerKeys'
+          :virtual-scroll-item-size='72'
+          :virtual-scroll-slice-size='12'
+          @virtual-scroll='onFollowersScroll'
+          v-slot='{ item: pubkey }'
+        >
+          <BaseUserCard :key='pubkey' :pubkey='pubkey' :show-following='true' />
+        </q-virtual-scroll>
       </q-tab-panel>
 
       <q-tab-panel name="relays" class='no-padding'>
@@ -163,7 +155,9 @@ export default defineComponent({
       tab: 'posts',
       followsEvent: null,
       follows: [],
-      followers: [],
+      followers: {},
+      followerCount: 0,
+      followersSeeded: false,
       // Render follows/followers a page at a time. Rendering the full list at
       // once (and fetching every profile) freezes mobile clients for accounts
       // that follow thousands of users, so we paginate with a "load more" button.
@@ -202,13 +196,15 @@ export default defineComponent({
   },
 
   watch: {
-    // Only fetch profiles for the cards we actually render. useProfile dedupes
-    // via profilesUsed, so re-running as the visible slice grows is cheap.
-    visibleFollows(pubkeys) {
-      pubkeys.forEach(pubkey => this.useProfile(pubkey))
-    },
-    visibleFollowers(pubkeys) {
-      pubkeys.forEach(pubkey => this.useProfile(pubkey))
+    // The lists are virtualized, so fetch profiles only for the rendered slice
+    // (the @virtual-scroll handlers extend this as the user scrolls). `follows`
+    // is reassigned only a handful of times (one kind-3 per revision), so seeding
+    // the first screenful here is cheap. We deliberately do NOT watch
+    // `followerKeys` — it recomputes on every streamed follower (thousands), and
+    // watching it produced a recompute storm that crashed mobile. Followers are
+    // seeded once from the stream callback instead.
+    follows() {
+      this.fetchUserRange(this.follows, 0, 15)
     },
   },
 
@@ -233,6 +229,9 @@ export default defineComponent({
       this.loadingMore = true
       this.followsShown = this.pageSize
       this.followersShown = this.pageSize
+      this.followers = {}
+      this.followerCount = 0
+      this.followersSeeded = false
       let relays = Object.keys(this.$store.state.relays).length ? Object.keys(this.$store.state.relays) : Object.keys(this.$store.state.defaultRelays)
 
       let profile = await dbProfile(this.hexPubkey)
@@ -266,10 +265,19 @@ export default defineComponent({
           // watcher; we no longer fetch every follow up front.
         }
       })
-      this.sub.dbStreamFollowers = await dbStreamFollowers({author: this.hexPubkey, relays}, events => {
+      this.sub.dbStreamFollowers = await dbStreamFollowers({author: this.hexPubkey, relays, limit: 300}, events => {
         for (let event of events) {
+          if (this.followers[event.pubkey]) continue
+          if (this.followerCount >= 300) break // bound memory; followers are approximate
           this.followers[event.pubkey] = true
-          // Profiles for the visible page are fetched by the visibleFollowers watcher.
+          this.followerCount++
+        }
+        // Seed profiles for the first screenful once (the rest load on scroll via
+        // onFollowersScroll). We don't watch followerKeys — that recompute storm
+        // crashed mobile.
+        if (!this.followersSeeded && this.followerCount) {
+          this.followersSeeded = true
+          this.fetchUserRange(Object.keys(this.followers), 0, 15)
         }
       })
     },
@@ -293,12 +301,20 @@ export default defineComponent({
       }
     },
 
-    loadMoreFollows() {
-      this.followsShown += this.pageSize
+    // Fetch profiles for a slice of a pubkey list (used by the virtualized
+    // follows/followers lists — only the visible range, not the whole list).
+    fetchUserRange(list, from, to) {
+      for (let i = Math.max(0, from); i <= Math.min(list.length - 1, to); i++) {
+        this.useProfile(list[i])
+      }
     },
 
-    loadMoreFollowers() {
-      this.followersShown += this.pageSize
+    onFollowsScroll({ from, to }) {
+      this.fetchUserRange(this.follows, from, to + 4)
+    },
+
+    onFollowersScroll({ from, to }) {
+      this.fetchUserRange(this.followerKeys, from, to + 4)
     },
 
     useProfile(pubkey) {
@@ -355,5 +371,14 @@ export default defineComponent({
 }
 .q-tab-panels {
   background: var(--q-background);
+}
+/* Bounded scroll container so q-virtual-scroll virtualizes the follows/followers
+   lists (only the visible slice mounts). Without a height it renders every card,
+   which OOM-crashes mobile Safari — the same failure the feed had. svh + no
+   momentum layer keeps pinch-zoom stable. */
+.user-list-scroll {
+  height: calc(100svh - 12rem);
+  overflow-y: auto;
+  overflow-anchor: none;
 }
 </style>

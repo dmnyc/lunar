@@ -438,10 +438,7 @@ export default defineComponent({
       this.$store.dispatch('initKeys', keys)
       this.$store.dispatch('launch')
       this.initializeKeys = false
-      this.$router.push({
-        name: 'settings',
-        params: { initUser: true },
-      })
+      this.$router.push('/')
     },
 
     addNewRelay() {
@@ -455,7 +452,7 @@ export default defineComponent({
       this.$store.commit('setDefaultRelays', this.selectedRelays)
       this.$store.dispatch('initKeys', { pub })
       this.$store.dispatch('launch')
-      this.$router.push({ name: 'settings', params: { initUser: true } })
+      this.$router.push('/')
     },
 
     // Single funnel for every signer login (extension / bunker / nostrconnect),
