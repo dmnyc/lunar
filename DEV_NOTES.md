@@ -1,8 +1,15 @@
 # Lunar — dev notes (overhaul)
 
 Working handoff for the **Lunar** rebuild of astral.ninja (web Nostr client).
-Lives in the repo so it survives the folder/GitHub rename. Branch: **`overhaul`**
-(off `master`).
+Lives in the repo so it survives the folder/GitHub rename. **Single branch:
+`master`** (the `overhaul`/feature branches were consolidated and deleted;
+`master` auto-deploys to lunar.ninja via Vercel on push).
+
+> **Unpushed local commits** (as of this handoff): `cbbda8c`, `e9632c1`,
+> `73e9980` — the mobile-OOM work below. Production (lunar.ninja) is still at
+> `320c072`. Verify on device, then push `master` when ready.
+> Latest test preview: `lunar-htqrcz2up-the-daniels-projects.vercel.app`
+> (Vercel previews are public; `vercel deploy` from the working tree).
 
 ## Conventions
 - Commit only when asked; **never push** without explicit permission; no Claude
@@ -70,6 +77,83 @@ After: check the Docker build GitHub Action + any lunar.ninja deploy/DNS.
   (signer-agnostic self encrypt/decrypt: local key / NIP-07 / NIP-46 RPC) +
   `src/nostr/wallet/nwcBackup.js` (signs via signAsynchronously → query.publish
   so local-key users work). Back up / restore buttons in `BaseWalletConnect`.
+
+## Mobile OOM crashes — the big theme (in progress)
+
+iOS Safari has a tight per-tab memory ceiling. This 2022 codebase renders full
+lists with no virtualization and over-uses Vue deep reactivity, so an account
+with **many follows (test account: 1114)** OOM-crashes ("a problem repeatedly
+occurred") on almost every list view. **This is systemic, not one bug.** Use the
+**Safari Web Inspector** (Mac Safari → Develop → iPhone) — it's the only way to
+see the real cause; a clean console + crash = pure memory (profiles/images), a
+flooded console = a request storm.
+
+**The fix pattern (proven):** raw data stays OUT of Vue reactivity (`markRaw` /
+plain Maps / `shallowRef`), and every long list renders inside a
+`q-virtual-scroll` **with a bounded-height scroll container** — without an
+explicit height it can't find the window scroller in this layout and renders
+EVERY item (verified: 300 items → 300 mounted / 13.7k DOM nodes vs 15 mounted
+with a height). Use `height: calc(100svh - Nrem)` (svh, NOT dvh) and **omit
+`-webkit-overflow-scrolling: touch`** — its momentum layer crashes on pinch-zoom
+inside a nested scroller. iOS ignores `user-scalable=no`, so zoom always works.
+
+**Fixed this session (commits `cbbda8c`/`e9632c1`/`73e9980`):**
+- New **`src/nostr/feedEngine.js`** (Jumble-style): events in a plain Map outside
+  reactivity; reactive surface is a `shallowRef` of ids; `until`-paginated pages +
+  buffered live tail ("load N new"); torn down on `visibilitychange`/unmount.
+- **`Feed.vue`** rewritten on the engine + virtualized (`.feed-scroll`).
+- **`Profile.vue`** follows/followers virtualized; `dbStreamFollowers` capped
+  (limit 300) — it pulls full kind-3 contact lists (huge); removed a
+  `followerKeys` watcher that fired per streamed follower.
+- **`TheSearchMenu.vue`** follows list virtualized (was rendering all follows on
+  open → instant crash).
+- **NIP-05 storm killed**: `handleAddingProfileEventToCache` no longer fires a
+  per-profile `.well-known/nostr.json` fetch (hundreds of CORS-failing fetches at
+  once). Now on-demand only.
+- **`markRaw`** on `profilesCache`/`eventsCache` (mutations.js) — the main
+  subscription streams kind-0 for every follow; deep-reactive proxies were a
+  large, log-invisible memory cost.
+- **`namedProfiles`** getter: push instead of O(n²) spread-in-reduce.
+- Login now lands on the **feed** (not `/settings?initUser`); removed the
+  auto-opening "Your keys" dialog.
+
+**Still open (do as ONE systematic sweep next session):**
+- Grep every `v-for` over a big collection and virtualize/bound it. Known
+  remaining: **Messages/DM list**, **Notifications**, the **follows-reorder
+  Draggable** in `TheSearchMenu` (renders all follows in reorder mode).
+- **Images** are the other untested OOM suspect (full-res note images + avatars;
+  loading=lazy is on). Get a **memory timeline** on device to confirm
+  images-vs-profiles before optimizing (thumbnail proxy? cap concurrent decodes?).
+- Auth was a RED HERRING — the `nostr.wine` relays were not erroring. NDK has no
+  `relayAuthDefaultPolicy` (does nothing on NIP-42 challenge); leave it unless a
+  relay genuinely needs auth, then add `NDKRelayAuthPolicies.signIn({ndk})`.
+
+## NDK / nostr modernization backlog (from a full audit — high→low)
+1. **NIP-57 zaps → `NDKZapper`** (`src/nostr/zap.js`, `mixin.js:443`). M
+2. **Profile fetch queue → `NDKUser.fetchProfile()` batching** (`actions.js:371-410`). M
+3. **NIP-04/kind-4 DMs → NIP-17/NIP-44** (`actions.js:150`, `mixin.js:327`,
+   `query.js:203-219`). NIP-44 primitives already exist in `encryptionService.js`. L
+4. **(done)** deep-reactive caches → `markRaw`. Long term: move to Pinia
+   `shallowRef`/Map.
+5. **NIP-65 load → `NDKRelayList` / `autoConnectUserRelays`** (`actions.js:41-63`). S
+6. kind-3 publish still embeds relay JSON in content → emit kind-10002
+   (`actions.js:215`). S
+7. `streamMainProfilesFollows` passes unbounded authors → chunk to ≤500 / outbox
+   (`actions.js:75`, `query.js:185`). S–M
+8. **(done)** `nip05.queryProfile` bulk verify removed; long term use
+   `ndk.getUserFromNip05()` for on-demand (`actions.js:463`, `Settings.vue:227`).
+9. NWC uses NIP-04 (spec-correct); `@getalby/sdk` is an unused dep on this path. S
+10. Profile search hand-rolls a Primal WebSocket → NDK `search` filter
+    (`profileSearch.js`). M
+11. No `visibilitychange` gating on `unread.js` streams (handler commented in
+    `MainLayout.vue`). S
+12. `ndk-cache-dexie` unconfigured + DB still named `astral-ndk-cache`
+    (`ndk.js:38`); add `expiresAt`, rename. S
+13. Delete dead `src/*.worker.js` (relay/query/db/event). S
+14. `store/state.js` default relays are dead 2022 list → import `DEFAULT_RELAYS`
+    from `ndk.js`. S
+15. `signAsynchronously` bypasses NDK for local keys → always `NDKEvent.sign()`
+    (`utils/event.js:44`). S
 
 ## Gotchas
 - `$primary` is **white** (#ffffff) → any FILLED `q-btn color="primary"` is
