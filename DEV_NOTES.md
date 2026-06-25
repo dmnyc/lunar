@@ -162,6 +162,31 @@ inside a nested scroller. iOS ignores `user-scalable=no`, so zoom always works.
   (kept to preserve sessions through the rebrand). Migrate later with an old→new
   copy if desired.
 
+## Component rebuild (in progress)
+
+**Goal:** Replace Vuex with Pinia, rebuild all pages on NDK + feedEngine patterns,
+delete dead code. Each phase ships as a PR.
+
+**Phase 1 — Pinia stores (done this session):**
+- `src/stores/user.js` — keys, follows, config, launch(), publishEvent()
+- `src/stores/profile.js` — profile cache (plain Map + markRaw, shallowRef epoch)
+- `src/stores/relay.js` — relay list, NIP-65 load
+- `src/nostr/feedEngine.js` — added `baseFilter` param for custom tag filters (#p, #t)
+
+**Phase 2 — Remaining OOM pages (done this session):**
+- `Notifications.vue` — rewritten on feedEngine + q-virtual-scroll (kinds 1/6/7/9735 #p filter)
+- `Hashtag.vue` — rewritten on feedEngine + q-virtual-scroll (#t filter)
+- `Inbox.vue` — virtualized chat list with q-virtual-scroll + Pinia profile store
+- `Messages.vue` — bounded height CSS fix on mobile (was unbounded → OOM)
+
+**Still open:**
+- `Event.vue` (thread view) — low OOM risk, skip for now
+- `BasePostEntry.vue` (1447 lines) — split into BasePostCard + BasePostThread
+- `Profile.vue` — remove remaining Vuex deps; switch to `stores/profile.js`
+- Vuex → Pinia migration for all components (Phase 4 — after all pages rebuilt)
+- Delete `src/store/` (entire Vuex dir), `src/*.worker.js` (Phase 4)
+- NIP-17 DMs — NIP-44 encrypt/decrypt exists in encryptionService.js; zapcooking nip17.ts is reference
+
 ## Next / pending
 1. **Spark wallet** — `@breeztech/breez-sdk-spark` (big WASM). Currently
    scaffolded as "coming soon" (kind 4) in the wallet store. zapcooking

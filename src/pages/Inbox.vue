@@ -3,58 +3,81 @@
     <BaseHeader>
       <div class='flex row no-wrap justify-start' style='gap: 1rem;'>
         <span>{{ $t('inbox') }}</span>
-        <q-btn v-if='$store.getters.unreadChats' label='mark all as read' @click.stop='markAllAsRead' color='secondary' outline dense/>
+        <q-btn
+          v-if='$store.getters.unreadChats'
+          label='mark all as read'
+          @click.stop='markAllAsRead'
+          color='secondary'
+          outline
+          dense
+        />
       </div>
     </BaseHeader>
-    <q-list class='q-py-sm q-pr-sm q-gutter-sm'>
-      <div v-if="loading" class='flex row justify-center items-start q-my-md'>
-        <q-spinner-orbit color="accent"  size='md'/>
-      </div>
+
+    <div v-if='loading' class='flex row justify-center items-start q-my-md'>
+      <q-spinner-orbit color='accent' size='md' />
+    </div>
+
+    <q-virtual-scroll
+      v-else
+      class='inbox-scroll'
+      :items='chats'
+      :virtual-scroll-item-size='72'
+      :virtual-scroll-slice-size='15'
+      @virtual-scroll='onScroll'
+      v-slot='{ item: chat }'
+    >
       <q-item
-        v-for="chat in chats"
-        :key="chat.peer"
+        :key='chat.peer'
         v-ripple
         clickable
         class='flex row no-padding no-margin justify-between items-center q-gutter-xs'
         @click.capture.stop="$router.push({ name: 'messages', params: { pubkey: hexToBech32(chat.peer, 'npub') } })"
       >
         <div class='col q-pl-md q-pr-auto flex row'>
-          <BaseUserCard v-if='chat.peer' :pubkey='chat.peer' :action-buttons='false' class='col' :clickable='false' :show-following='true'/>
+          <BaseUserCard
+            v-if='chat.peer'
+            :pubkey='chat.peer'
+            :action-buttons='false'
+            class='col'
+            :clickable='false'
+            :show-following='true'
+          />
           <q-badge
-            v-if="$store.state.unreadMessages[chat.peer]"
-            color="secondary"
+            v-if='$store.state.unreadMessages[chat.peer]'
+            color='secondary'
             outline
             class='text-bold q-my-auto'
           >
             {{ $store.state.unreadMessages[chat.peer] }}
           </q-badge>
         </div>
-        <label class='no-padding text-right'>
+        <label class='no-padding text-right q-pr-sm'>
           {{ niceDateUTC(chat.lastMessage) }}
         </label>
       </q-item>
-    </q-list>
+    </q-virtual-scroll>
 
-    <div v-if='!loading && !chats.length' class="m-8 text-base">
+    <div v-if='!loading && !chats.length' class='m-8 text-base q-pa-md'>
       <p>
-        Start a chat by clicking
-        <q-icon unelevated color="primary" name="mail_lock" size="md" /> icon on
-        someone's profile page or user card.
+        Start a chat by clicking the
+        <q-icon unelevated color='primary' name='mail_lock' size='md' />
+        icon on someone's profile page or user card.
       </p>
     </div>
   </q-page>
 </template>
 
 <script>
-import {dbChats, streamMainIncomingMessages, streamMainOutgoingMessages} from '../query'
+import { defineComponent } from 'vue'
+import { dbChats, streamMainIncomingMessages, streamMainOutgoingMessages } from '../query'
 import helpersMixin from '../utils/mixin'
+import { useProfileStore } from '../stores/profile'
+import { useRelayStore } from '../stores/relay'
 import { createMetaMixin } from 'quasar'
 
 const metaData = {
-  // sets document title
   title: 'lunar - inbox',
-
-  // meta tags
   meta: {
     description: { name: 'description', content: 'Nostr direct message inbox' },
     keywords: { name: 'keywords', content: 'nostr decentralized social media' },
@@ -62,7 +85,7 @@ const metaData = {
   },
 }
 
-export default {
+export default defineComponent({
   name: 'Inbox',
   mixins: [helpersMixin, createMetaMixin(metaData)],
 
@@ -81,7 +104,7 @@ export default {
   },
 
   async mounted() {
-    this.start()
+    await this.start()
   },
 
   beforeUnmount() {
@@ -91,39 +114,56 @@ export default {
   methods: {
     async start() {
       this.loading = true
-      let relays = Object.keys(this.$store.state.relays).length ? Object.keys(this.$store.state.relays) : Object.keys(this.$store.state.defaultRelays)
+      const relays = useRelayStore().urls
 
-      this.getChats()
+      await this.getChats()
 
-      this.sub.streamMainIncomingMessages = await streamMainIncomingMessages({ authors: [this.$store.state.keys.pub], relays, limit: 1000 }, null, () => {
-        this.getChats()
-        this.loading = false
-      })
-      this.sub.streamMainOutgoingMessages = await streamMainOutgoingMessages({ authors: [this.$store.state.keys.pub], relays, limit: 1000 }, null, () => {
-        this.getChats()
-        this.loading = false
-      })
+      const pub = this.$store.state.keys.pub
+      this.sub.in = streamMainIncomingMessages(
+        { authors: [pub], relays, limit: 500 },
+        null,
+        () => { this.getChats(); this.loading = false }
+      )
+      this.sub.out = streamMainOutgoingMessages(
+        { authors: [pub], relays, limit: 500 },
+        null,
+        () => { this.getChats(); this.loading = false }
+      )
+      this.loading = false
     },
+
     stop() {
-      if (this.sub.streamMainIncomingMessages) this.sub.streamMainIncomingMessages.cancel()
-      if (this.sub.streamMainOutgoingMessages) this.sub.streamMainOutgoingMessages.cancel()
+      if (this.sub.in) this.sub.in.cancel()
+      if (this.sub.out) this.sub.out.cancel()
     },
+
     async getChats() {
-      this.chats = await dbChats(this.$store.state.keys.pub)
-      this.chats.forEach(({peer}) => this.useProfile(peer))
-      if (this.allChatsNeverRead) this.chats.forEach(({peer}) => this.$store.commit('haveReadMessage', peer))
+      const pub = this.$store.state.keys.pub
+      this.chats = await dbChats(pub)
+      const profileStore = useProfileStore()
+      this.chats.forEach(({ peer }) => profileStore.ensure(peer))
+      if (this.allChatsNeverRead) {
+        this.chats.forEach(({ peer }) => this.$store.commit('haveReadMessage', peer))
+      }
     },
 
     markAllAsRead() {
-      this.chats.forEach(chat => {
-        this.$store.commit('haveReadMessage', chat.peer)
-      })
+      this.chats.forEach(({ peer }) => this.$store.commit('haveReadMessage', peer))
     },
 
-    useProfile(pubkey) {
-      this.$store.dispatch('useProfile', {pubkey})
-    },
+    onScroll({ from, to }) {
+      const profileStore = useProfileStore()
+      const slice = this.chats.slice(from, to + 1)
+      profileStore.ensureMany(slice.map(c => c.peer))
+    }
   }
-}
+})
 </script>
 
+<style lang='scss' scoped>
+.inbox-scroll {
+  height: calc(100svh - 7rem);
+  overflow-y: auto;
+  overflow-anchor: none;
+}
+</style>

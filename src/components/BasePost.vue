@@ -140,12 +140,27 @@
           v-if="event.kind === 1"
           :content='event.interpolated.text'
           :long-form='isLongForm'
+          :imeta='eventImeta'
           @expand='isLongForm = !isLongForm'
           @resized='calcConnectorValues(10)'
         />
         <BaseRelayRecommend v-else-if="event.kind === 2" :url="sanitize(event.content)" />
         <BaseUserCard v-else-if="event.kind === 0" :pubkey='event.pubkey' :header-mode='true' />
-        <pre v-else> {{ cleanEvent }} </pre>
+        <!-- kind 7: reaction — resolve custom :emoji: shortcodes from tags -->
+        <div v-else-if="event.kind === 7" class='reaction-display'>
+          <img
+            v-if='reactionEmoji.url'
+            :src='reactionEmoji.url'
+            :alt='reactionEmoji.name'
+            style='height: 2.5em; width: auto; vertical-align: middle;'
+          />
+          <span v-else class='text-h5'>{{ event.content || '+' }}</span>
+        </div>
+        <!-- kind 6: repost — content is the embedded event JSON; the repost renders
+             via the mentionEvents block below, so suppress raw JSON here -->
+        <template v-else-if="event.kind === 6" />
+        <!-- unknown kinds: show content text, not full raw JSON -->
+        <pre v-else style='font-size: .75rem; white-space: pre-wrap; overflow: auto; opacity: .7;'>{{ event.content }}</pre>
         <div
           v-if='!isEmbeded && (isQuote || isRepost)'
           class='reposts flex column q-pr-md'
@@ -183,57 +198,79 @@
               dense
               flat
               active-color='primary'
-              :size='highlighted ? "md" : "sm"'
               @click.stop
             >
-          <!-- <div v-if='replyMode && replyMode !== "tip"' class='text-primary text-thin col q-pl-xs' style=' font-size: 90%; font-weight: 300;'>{{replyMode}}</div> -->
-              <q-tab  class='no-padding'>
-                <BaseButtonLightning
-                  v-if='$store.getters.profileLud06(event.pubkey)'
-                  :pubkey='event.pubkey'
-                  :size='highlighted ? "md" : "sm"'
-                />
-              </q-tab>
-              <q-tab name='embed' class='no-padding'>
-                <q-icon name='link' >
-                  <q-tooltip>
-                    embed
-                  </q-tooltip>
-                </q-icon>
-              </q-tab>
-              <q-tab name='repost' class='no-padding'>
-                <q-icon name='repeat' >
-                  <q-tooltip>
-                    repost
-                  </q-tooltip>
-                </q-icon>
-              </q-tab>
-              <q-tab name='quote' class='no-padding'>
-                <q-icon name='format_quote' >
-                  <q-tooltip>
-                    quote
-                  </q-tooltip>
-                </q-icon>
-              </q-tab>
-              <q-tab name='reply' class='no-padding no-wrap flex row'>
-                <div class='no-wrap flex row items-center self-start' style='gap: .5rem;'>
-                <q-icon name='chat_bubble_outline' class='flip-horizontal relative-position' >
-                  <q-tooltip>
-                    reply
-                  </q-tooltip>
-                </q-icon>
-                <span v-if='replyCount' style='position: abosolute; right: 0'>{{replyCount}}</span>
+              <!-- reply -->
+              <q-tab name='reply' class='no-padding'>
+                <div class='flex row no-wrap items-center' style='gap: .3rem;'>
+                  <q-icon name='chat_bubble_outline' :size='iconSize' class='flip-horizontal'/>
+                  <span v-if='replyCount' class='action-count'>{{ replyCount }}</span>
                 </div>
+                <q-tooltip>reply</q-tooltip>
               </q-tab>
+
+              <!-- like / reaction -->
+              <q-tab class='no-padding' @click.stop='sendReaction'>
+                <div class='flex row no-wrap items-center' style='gap: .3rem;'>
+                  <q-icon
+                    :name='hasReacted ? "favorite" : "favorite_border"'
+                    :color='hasReacted ? "pink-4" : ""'
+                    :size='iconSize'
+                  />
+                  <span v-if='reactionCount' class='action-count'>{{ reactionCount }}</span>
+                </div>
+                <q-tooltip>{{ hasReacted ? 'reacted' : 'react' }}</q-tooltip>
+              </q-tab>
+
+              <!-- repost — tap opens popup: repost | quote -->
+              <q-tab class='no-padding' @click.stop>
+                <q-icon name='repeat' :size='iconSize'/>
+                <q-tooltip>repost</q-tooltip>
+                <q-menu auto-close>
+                  <q-list dense style='min-width: 8rem;'>
+                    <q-item clickable @click.stop='replyMode = "repost"'>
+                      <q-item-section avatar><q-icon name='repeat' size='xs'/></q-item-section>
+                      <q-item-section>repost</q-item-section>
+                    </q-item>
+                    <q-item clickable @click.stop='replyMode = "quote"'>
+                      <q-item-section avatar><q-icon name='format_quote' size='xs'/></q-item-section>
+                      <q-item-section>quote</q-item-section>
+                    </q-item>
+                  </q-list>
+                </q-menu>
+              </q-tab>
+
+              <!-- zap -->
+              <q-tab class='no-padding' @click.stop='$store.getters.profileLud06(event.pubkey) ? showZapDialog = true : null'>
+                <div class='flex row no-wrap items-center' style='gap: .3rem;'>
+                  <q-icon
+                    name='bolt'
+                    :size='iconSize'
+                    :style='$store.getters.profileLud06(event.pubkey) ? "" : "opacity: .25;"'
+                  />
+                  <span v-if='zapTotal' class='action-count'>{{ zapTotal >= 1000 ? (zapTotal / 1000).toFixed(1) + "k" : zapTotal }}</span>
+                </div>
+                <q-tooltip>tip</q-tooltip>
+                <q-dialog v-model='showZapDialog' @click.stop>
+                  <BaseLightningCard
+                    :ln-string='$store.getters.profileLud06(event.pubkey)'
+                    :pubkey='event.pubkey'
+                    style='padding: 1.5rem;'
+                    @paid='showZapDialog = false'
+                  />
+                </q-dialog>
+              </q-tab>
+
+              <!-- embed / link — at the end -->
+              <q-tab name='embed' class='no-padding'>
+                <q-icon name='link' :size='iconSize'/>
+                <q-tooltip>copy event ID</q-tooltip>
+              </q-tab>
+
+              <!-- cancel active panel -->
               <q-tab v-if='replyMode && replyMode !== "tip"' class='no-padding' @click.stop='replyMode = null'>
-                <q-icon
-                  name="close"
-                  color='accent'
-                >
-                  <q-tooltip>
-                    cancel
-                  </q-tooltip>
-                </q-icon>
+                <q-icon name='close' :size='iconSize' color='accent'/>
+                <q-tooltip>cancel</q-tooltip>
               </q-tab>
             </q-tabs>
           <!-- </div> -->
@@ -292,7 +329,10 @@ import BaseButtonCopy from 'components/BaseButtonCopy.vue'
 import BaseMarkdown from 'components/BaseMarkdown.vue'
 import BaseRelayRecommend from 'components/BaseRelayRecommend.vue'
 import BaseButtonLightning from 'components/BaseButtonLightning.vue'
+import BaseLightningCard from 'components/BaseLightningCard.vue'
 import DOMPurify from 'dompurify'
+import { fetchReactionsFromCache, fetchZapTotalFromCache } from '../nostr/reactions'
+import { useUserStore } from '../stores/user'
 
 export default defineComponent({
   name: 'BasePost',
@@ -313,6 +353,7 @@ export default defineComponent({
     BaseMarkdown,
     BaseRelayRecommend,
     BaseButtonLightning,
+    BaseLightningCard,
   },
 
   data() {
@@ -328,10 +369,39 @@ export default defineComponent({
       resizing: false,
       trigger: 1,
       isLongForm: false,
+      reactionCount: 0,
+      hasReacted: false,
+      reactSending: false,
+      showZapDialog: false,
+      zapTotal: 0,
     }
   },
 
   computed: {
+    iconSize() {
+      return this.highlighted ? '22px' : '18px'
+    },
+
+    // NIP-92 imeta: Map<url, {mimeType, alt}> parsed from ["imeta", "url <u>", "m <mime>", "alt <text>"] tags
+    eventImeta() {
+      const tags = this.event.tags || []
+      const imetaTags = tags.filter(t => t[0] === 'imeta')
+      if (!imetaTags.length) return null
+      const map = new Map()
+      for (const tag of imetaTags) {
+        let url = null, mimeType = null, alt = null
+        for (let i = 1; i < tag.length; i++) {
+          const [key, ...rest] = tag[i].split(' ')
+          const val = rest.join(' ')
+          if (key === 'url') url = val
+          else if (key === 'm') mimeType = val
+          else if (key === 'alt') alt = val
+        }
+        if (url) map.set(url, { mimeType, alt })
+      }
+      return map.size ? map : null
+    },
+
     // NIP-89 client tag: ["client", "<name>", ...] — shown as "via <name>"
     clientName() {
       const tag = (this.event.tags || []).find((t) => t[0] === 'client' && t[1])
@@ -346,6 +416,16 @@ export default defineComponent({
       let pubkeyTags = this.event.tags.filter((tag) => tag[0] === 'p' && tag[1]).map((tag) => tag[1])
       if (pubkeyTags?.length) return pubkeyTags
       return null
+    },
+
+    reactionEmoji() {
+      const content = (this.event.content || '').trim()
+      const m = content.match(/^:([^:]+):$/)
+      if (m) {
+        const tag = (this.event.tags || []).find(([t, n]) => t === 'emoji' && n === m[1])
+        if (tag?.[2]) return { url: tag[2], name: m[1] }
+      }
+      return { url: null, name: null }
     },
 
     isRepost() {
@@ -416,6 +496,10 @@ export default defineComponent({
     this.calcConnectorValues()
     this.$emit('mounted')
     this.isLongForm = this.event.content.length > 600 || this.event.content.split(/\r\n|\r|\n/).length > 10
+    if (!this.isEmbeded && this.event.kind === 1) {
+      this.loadReactions()
+      this.loadZaps()
+    }
   },
 
   activated() {
@@ -430,6 +514,42 @@ export default defineComponent({
   // },
 
   methods: {
+    async loadReactions() {
+      const myPub = this.$store.state.keys.pub
+      const reactions = await fetchReactionsFromCache(this.event.id)
+      this.reactionCount = reactions.length
+      this.hasReacted = myPub ? reactions.some((r) => r.pubkey === myPub) : false
+    },
+
+    async loadZaps() {
+      this.zapTotal = await fetchZapTotalFromCache(this.event.id)
+    },
+
+    async sendReaction() {
+      if (this.hasReacted || this.reactSending || !this.$store.state.keys.pub) return
+      this.reactSending = true
+      try {
+        const userStore = useUserStore()
+        await userStore.publishEvent({
+          pubkey: this.$store.state.keys.pub,
+          created_at: Math.floor(Date.now() / 1000),
+          kind: 7,
+          tags: [
+            ['e', this.event.id],
+            ['p', this.event.pubkey],
+            ['k', String(this.event.kind)],
+          ],
+          content: '+',
+        })
+        this.hasReacted = true
+        this.reactionCount++
+      } catch (err) {
+        this.$q.notify({ message: err?.message || 'Failed to send reaction.', color: 'negative' })
+      } finally {
+        this.reactSending = false
+      }
+    },
+
     childReplyConnectorStyle() {
       if (this.childReplyHeights?.length) {
         let height = this.headerHeight + this.postHeight + this.childReplyHeights.slice(0, -1).reduce((c, p) => c + p, 0)
@@ -496,6 +616,16 @@ export default defineComponent({
 })
 </script>
 <style lang="css" scoped>
+.action-count {
+  font-size: 0.7rem;
+  line-height: 1;
+  margin-left: 2px;
+  opacity: 0.85;
+}
+.reaction-display {
+  padding: 0.25rem 0;
+  text-align: center;
+}
 .post-padding {
   box-sizing: border-box;
   /*

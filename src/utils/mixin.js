@@ -440,28 +440,22 @@ export default {
         // console.log('lnAddrToLnurl error: ', error, ' for ', lnAddr)
       }
     },
-    async getInvoice(lnString, amount, pubkey = null, eventId = null) {
+    async getInvoice(lnString, amount, pubkey = null, eventId = null, comment = '') {
       // Already a bolt11 invoice — nothing to fetch.
       if (lnString.toLowerCase().indexOf('lnbc') === 0) return lnString
       if (!amount) return lnString
 
-      try {
-        // Zap-aware: attaches a signed NIP-57 zap request when the recipient's
-        // LNURL endpoint supports it, otherwise falls back to a plain tip.
-        return await fetchZapInvoice({
-          store: this.$store,
-          lnString,
-          recipientPubkey: pubkey,
-          amountSats: amount,
-          eventId
-        })
-      } catch (e) {
-        Notify.create({
-          message: 'Error fetching invoice from LNURL. ' + e.toString(),
-          color: 'negative'
-        })
-        return lnString
-      }
+      // Zap-aware: attaches a signed NIP-57 zap request when the recipient's
+      // LNURL endpoint supports it, otherwise falls back to a plain tip.
+      // Throws on error — callers handle the notification.
+      return await fetchZapInvoice({
+        store: this.$store,
+        lnString,
+        recipientPubkey: pubkey,
+        amountSats: amount,
+        comment,
+        eventId
+      })
     }
   }
 }

@@ -11,7 +11,7 @@
 
     <div class='section flex column' style='gap: .6rem;'>
       <div class="text-bold flex justify-between no-wrap items-center" style='font-size: 1.1rem;'>
-        <span>zap defaults</span>
+        <span>tip defaults</span>
         <q-toggle
           :model-value='tips.enabled'
           color='accent'
@@ -36,16 +36,16 @@
           />
         </div>
 
-        <span style='white-space: nowrap;'><strong>one click zap</strong></span>
+        <span style='white-space: nowrap;'><strong>one click tip</strong></span>
         <div style='font-size: .9rem;'>
-          when enabled, the <q-icon name='bolt' style='font-size: 1.2rem;'/> button zaps the default
+          when enabled, the <q-icon name='bolt' style='font-size: 1.2rem;'/> button tips the default
           amount in one click using your connected wallet (or a WebLN extension). the dropdown arrow
-          always opens the normal zap pay flow.
+          always opens the normal tip pay flow.
         </div>
         <div class='flex row no-wrap items-center' style='gap: 1.5rem;'>
           <q-toggle
             :model-value='tips.oneClick.enabled'
-            label='enable one click zap'
+            label='enable one click tip'
             color='accent'
             size='sm'
             @update:model-value='val => saveOneClick({ enabled: val })'

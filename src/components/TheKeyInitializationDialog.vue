@@ -23,7 +23,6 @@
         <h2 class="text-subtitle2 q-pr-md">sign in with a signer</h2>
         <div class='flex row no-wrap' style='gap: .4rem;'>
           <q-btn
-            v-if='hasExtension'
             size='sm'
             color='primary'
             outline
@@ -160,7 +159,7 @@
                 generate keys
               </q-btn>
               <q-btn
-                v-if="hasExtension && !isKeyValid"
+                v-if="!isKeyValid"
                 size="sm"
                 color="primary"
                 outline
@@ -287,10 +286,6 @@ export default defineComponent({
     return {
       watchOnly: false,
       key: null,
-      // detect a NIP-07 extension immediately (most inject window.nostr before
-      // mount); the delayed re-check in created() is just a fallback for
-      // late-injecting extensions, so the button doesn't pop in after load
-      hasExtension: typeof window !== 'undefined' && !!window.nostr,
       selectedRelays: this.$store.state.defaultRelays,
       newRelay: '',
       showBunker: false,
@@ -366,15 +361,6 @@ export default defineComponent({
   },
 
   async created() {
-    if (!this.$store.state.keys.pub) {
-      // keys not set up, offer the option to try to get a pubkey from window.nostr
-      setTimeout(() => {
-        if (window.nostr) {
-          this.hasExtension = true
-        }
-      }, 1000)
-    }
-
     // Watch the signer for async logins (NIP-46 nostrconnect approval arrives
     // via a relay listener, not a button click) — finish login when it lands.
     const auth = getAuthManager()
@@ -401,6 +387,10 @@ export default defineComponent({
 
   methods: {
     async getFromExtension() {
+      if (!window.nostr) {
+        this.$q.notify({ message: 'No browser extension found. Install Alby or nos2x.', color: 'warning' })
+        return
+      }
       try {
         this.key = await window.nostr.getPublicKey()
         this.watchOnly = true
@@ -465,6 +455,10 @@ export default defineComponent({
 
     async loginWithExtension() {
       this.signerError = ''
+      if (!window.nostr) {
+        this.signerError = 'No browser extension found. Install Alby or nos2x, then reload.'
+        return
+      }
       const auth = getAuthManager()
       if (!auth) {
         this.signerError = 'signer not ready, please reload'

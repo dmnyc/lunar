@@ -361,14 +361,21 @@ export default {
   left: .3rem;
   background: var(--q-background) !important;
 }
-  #message-scroll {
-    padding: 0 .3rem;
-  }
+
+/* Bound the scroll container on all viewports — without this iOS renders the
+   entire message list DOM at once and OOM-crashes on long conversations. The
+   header on mobile is ~9rem (two user cards + datestamp bar); the send box is
+   ~5rem; 14rem total leaves the message list the remaining viewport height. */
+#message-scroll {
+  overflow-y: auto;
+  padding: 0 .3rem;
+  height: calc(100svh - 14rem);
+}
+
 @media screen and (min-width: 600px) {
   .q-page {
     height: inherit;
     overflow: hidden;
-
   }
   #header-placeholder {
     display: none;
@@ -382,9 +389,7 @@ export default {
     left: unset;
   }
   #message-scroll {
-    overflow: auto;
     height: 100%;
-    padding: 0 .3rem;
   }
 }
 </style>

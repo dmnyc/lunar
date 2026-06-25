@@ -8,7 +8,8 @@
 // it falls back to a plain LNURL tip.
 
 import { bech32 } from '@scure/base'
-import { signAsynchronously } from '../utils/event'
+import ndk from './ndk'
+import { NDKEvent } from '@nostr-dev-kit/ndk'
 
 function lnurlToUrl(lnurl) {
   const s = lnurl.trim()
@@ -33,6 +34,19 @@ async function fetchLnurlPayMetadata(lnString) {
   return data // { callback, minSendable, maxSendable, allowsNostr, nostrPubkey, commentAllowed }
 }
 
+async function fetchInvoiceFromUrl(url) {
+  const res = await fetch(url)
+  if (!res.ok) {
+    const body = await res.json().catch(() => null)
+    const reason = body?.reason || body?.message || ''
+    throw new Error(`could not fetch invoice (${res.status})${reason ? ': ' + reason : ''}`)
+  }
+  const data = await res.json()
+  if (data.status === 'ERROR') throw new Error(data.reason || 'invoice error')
+  if (!data.pr) throw new Error('no invoice returned')
+  return data.pr
+}
+
 // Resolve a lightning address / LNURL into a plain bolt11 invoice (no zap
 // request) — used by the wallet "send" flow.
 export async function fetchLnurlInvoice(lnStringOrAddress, amountSats, comment = '') {
@@ -47,17 +61,12 @@ export async function fetchLnurlInvoice(lnStringOrAddress, amountSats, comment =
   }
   let url = `${meta.callback}${meta.callback.includes('?') ? '&' : '?'}amount=${amountMsats}`
   if (comment && meta.commentAllowed) url += `&comment=${encodeURIComponent(comment.slice(0, meta.commentAllowed))}`
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`could not fetch invoice (${res.status})`)
-  const data = await res.json()
-  if (data.status === 'ERROR') throw new Error(data.reason || 'invoice error')
-  if (!data.pr) throw new Error('no invoice returned')
-  return data.pr
+  return fetchInvoiceFromUrl(url)
 }
 
-// Build and sign a NIP-57 kind-9734 zap request.
+// Build and sign a NIP-57 kind-9734 zap request using NDKEvent so NDK's
+// canonical ID computation and signer path are used (matches zapcooking).
 export async function buildZapRequest({
-  store,
   recipientPubkey,
   amountSats,
   comment = '',
@@ -65,22 +74,19 @@ export async function buildZapRequest({
   lnurl,
   relays
 }) {
-  const tags = [
-    ['relays', ...relays],
+  const zapRequest = new NDKEvent(ndk)
+  zapRequest.kind = 9734
+  zapRequest.content = comment || ''
+  zapRequest.tags = [
+    ['p', recipientPubkey],
     ['amount', String(amountSats * 1000)],
-    ['p', recipientPubkey]
+    ['relays', ...relays],
   ]
-  if (lnurl) tags.push(['lnurl', lnurl])
-  if (eventId) tags.push(['e', eventId])
+  if (lnurl) zapRequest.tags.push(['lnurl', lnurl])
+  if (eventId) zapRequest.tags.push(['e', eventId])
 
-  const event = {
-    kind: 9734,
-    content: comment || '',
-    tags,
-    pubkey: store.state.keys.pub,
-    created_at: Math.round(Date.now() / 1000)
-  }
-  return signAsynchronously(event, store)
+  await zapRequest.sign()
+  return zapRequest.rawEvent()
 }
 
 // Resolve an lnurl + amount into a payable bolt11 invoice. Attaches a zap
@@ -108,15 +114,21 @@ export async function fetchZapInvoice({
 
   let url = `${meta.callback}${meta.callback.includes('?') ? '&' : '?'}amount=${amountMsats}`
 
-  const canZap = meta.allowsNostr && meta.nostrPubkey && recipientPubkey && store?.state?.keys?.pub
+  const canZap = meta.allowsNostr && meta.nostrPubkey && recipientPubkey && ndk.signer
   if (canZap) {
+    // Prefer live connected relays so zap receipts land somewhere reachable.
+    // Fall back to the store relay list, then the NDK explicit set.
+    const connectedUrls = ndk.pool.connectedRelays().map(r => r.url)
     const zapRelays = relays.length
       ? relays
-      : Object.keys(store.state.relays).length
-        ? Object.keys(store.state.relays)
-        : Object.keys(store.state.defaultRelays)
+      : connectedUrls.length
+        ? connectedUrls
+        : store
+          ? Object.keys(store.state.relays).length
+            ? Object.keys(store.state.relays)
+            : Object.keys(store.state.defaultRelays)
+          : ndk.explicitRelayUrls || []
     const zapReq = await buildZapRequest({
-      store,
       recipientPubkey,
       amountSats,
       comment,
@@ -130,10 +142,5 @@ export async function fetchZapInvoice({
     url += `&comment=${encodeURIComponent(comment.slice(0, meta.commentAllowed))}`
   }
 
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`could not fetch invoice (${res.status})`)
-  const data = await res.json()
-  if (data.status === 'ERROR') throw new Error(data.reason || 'invoice error')
-  if (!data.pr) throw new Error('no invoice returned')
-  return data.pr
+  return fetchInvoiceFromUrl(url)
 }

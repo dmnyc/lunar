@@ -1,31 +1,55 @@
 <template>
   <q-page>
     <BaseHeader>{{ $t('notifications') }}</BaseHeader>
-    <div>
-      <div v-for="event in notifications" :key="event.id">
+
+    <BaseButtonLoadMore
+      v-if='pendingCount'
+      :loading-more='false'
+      :label='"load " + pendingCount + " new"'
+      @click='showNew'
+    />
+
+    <q-virtual-scroll
+      class='notif-scroll'
+      :items='items'
+      :virtual-scroll-item-size='200'
+      :virtual-scroll-slice-size='10'
+      @virtual-scroll='onVirtualScroll'
+      v-slot='{ item }'
+    >
+      <div :key='item'>
         <BasePost
-          :event="event"
-          :highlighted="$store.state.lastNotificationRead < event.created_at"
+          :event='getEvent(item)'
+          :highlighted='lastRead < (getEvent(item) && getEvent(item).created_at)'
+          position='standalone'
+          @click.stop='toEvent(item)'
         />
         <div class='bottom-border'></div>
       </div>
-      <BaseButtonLoadMore :loading-more='loadingMore' :reached-end='reachedEnd' @click='loadMore' />
+    </q-virtual-scroll>
+
+    <div v-if='loading' class='row justify-center q-py-md'>
+      <q-spinner-orbit color='accent' size='md' />
+    </div>
+    <div v-else-if='reachedEnd && items.length' class='text-center text-caption text-grey q-py-md'>
+      — end of notifications —
     </div>
   </q-page>
 </template>
 
 <script>
+import { defineComponent, markRaw } from 'vue'
 import helpersMixin from '../utils/mixin'
-import { addSorted } from '../utils/helpers'
-import {dbMentions} from '../query'
+import { createFeed } from '../nostr/feedEngine'
+import { useUserStore } from '../stores/user'
+import { useProfileStore } from '../stores/profile'
+import { useRelayStore } from '../stores/relay'
 import { createMetaMixin } from 'quasar'
+import BasePost from 'components/BasePost.vue'
 import BaseButtonLoadMore from 'components/BaseButtonLoadMore.vue'
 
 const metaData = {
-  // sets document title
   title: 'lunar - notifications',
-
-  // meta tags
   meta: {
     description: { name: 'description', content: 'Nostr notifications on lunar' },
     keywords: { name: 'keywords', content: 'nostr decentralized social media' },
@@ -33,30 +57,49 @@ const metaData = {
   },
 }
 
-export default {
+export default defineComponent({
   name: 'Notifications',
   mixins: [helpersMixin, createMetaMixin(metaData)],
-  components: {
-    BaseButtonLoadMore,
-  },
+  components: { BasePost, BaseButtonLoadMore },
 
   data() {
-    return {
-      notifications: [],
-      notificationsSet: new Set(),
-      reachedEnd: false,
-      unsubscribe: null,
-      reading: false,
-      loadingMore: true,
+    return { tick: 0 }
+  },
+
+  computed: {
+    items() {
+      void this.tick
+      return this.engine ? this.engine.timeline.value : []
+    },
+    pendingCount() {
+      void this.tick
+      return this.engine ? this.engine.pending.value.length : 0
+    },
+    loading() {
+      void this.tick
+      return this.engine ? this.engine.loading.value : false
+    },
+    reachedEnd() {
+      void this.tick
+      return this.engine ? this.engine.reachedEnd.value : false
+    },
+    lastRead() {
+      return this.$store.state.lastNotificationRead
     }
   },
+
   mounted() {
-    this.start()
+    this.build()
+    this._onVisibility = () => {
+      if (!this.engine) return
+      if (document.hidden) this.engine.stop()
+      else this.engine.resume()
+    }
+    document.addEventListener('visibilitychange', this._onVisibility)
   },
 
   activated() {
-    if (this.$store.state.unreadNotifications) this.loadNew()
-    this.highlightUnreadNotifications()
+    this.$store.commit('haveReadNotifications')
   },
 
   deactivated() {
@@ -64,116 +107,70 @@ export default {
   },
 
   beforeUnmount() {
-    if (this.unsubscribe) this.unsubscribe()
+    if (this._onVisibility) document.removeEventListener('visibilitychange', this._onVisibility)
+    if (this.engine) this.engine.destroy()
   },
 
   methods: {
-    async start() {
-      this.loadingMore = true
+    build() {
+      if (this.engine) this.engine.destroy()
 
-      this.loadMore()
+      const userStore = useUserStore()
+      const pub = userStore.pub || this.$store.state.keys.pub
+      if (!pub) return
 
-      this.unsubscribe = this.$store.subscribe(({type, payload}, state) => {
-        switch (type) {
-          case 'setUnreadNotifications':
-            this.loadNew()
-            break
-        }
-      })
+      const relays = useRelayStore().urls
 
-      this.highlightUnreadNotifications()
-      this.loadingMore = false
-    },
-    async loadMore() {
-      let until
-      if (this.notifications.length) until = this.notifications[this.notifications.length - 1].created_at - 1
-      else until = Math.round(Date.now() / 1000)
-      let loadedNotifications = await dbMentions(
-        this.$store.state.keys.pub,
-        50,
-        until
+      this.engine = markRaw(createFeed({
+        baseFilter: { kinds: [1, 6, 7, 9735], '#p': [pub] },
+        relays,
+        pageSize: 40,
+        enrich: (e) => this.interpolateEventMentions(e),
+      }))
+
+      this._bumps = [
+        this.engine.timeline, this.engine.pending, this.engine.loading, this.engine.reachedEnd
+      ]
+      this.$watch(
+        () => this._bumps.map((r) => r.value),
+        () => { this.tick++ },
+        { deep: false }
       )
-      // if (loadedNotifications.length < 40) {
-      //   this.reachedEnd = true
-      // }
 
-      await this.processNotifications(loadedNotifications)
-      // this.notifications.push(...loadedNotificationsFiltered)
-      // will mark notifications as read after 3 * unread count seconds in the page
-      this.highlightUnreadNotifications()
-      this.loadingMore = false
+      this.engine.start().then(() => this.ensureProfiles(0, 15))
     },
 
-    async loadNew(limit = 40) {
-      let loadedNotifications = await dbMentions(
-        this.$store.state.keys.pub,
-        limit
-      )
-      await this.processNotifications(loadedNotifications)
-      // this.notifications = loadedNotificationsFiltered.concat(this.notifications)
-      // will mark notifications as read after 3 * unread count seconds in the page
+    getEvent(id) {
+      return this.engine ? this.engine.getEvent(id) : null
     },
 
-    processNotifications(notifications) {
-      let notificationsFiltered = []
-      for (let i = 0; i < notifications.length; i++) {
-      // await notifications.forEach(async (event) => {
-        let event = notifications[i]
-        if (this.notificationsSet.has(event.id)) continue
-
-        this.notificationsSet.add(event.id)
-        this.interpolateEventMentions(event)
-        // if (event.tags.filter(([t, v]) => t === 'e' && v).length) this.processTaggedEvents(event)
-        // notificationsFiltered.push(event)
-        addSorted(this.notifications, event, (a, b) => a.created_at < b.created_at)
-        this.useProfile(event.pubkey)
-      }
-      return notificationsFiltered
-    },
-
-    highlightUnreadNotifications() {
-      if (
-        this.notifications.length > 0 &&
-        this.notifications[0].created_at > this.$store.state.lastNotificationRead
-      ) {
-        setTimeout(() => {
-          this.$store.commit('haveReadNotifications')
-        }, 3000 * this.notifications.filter(n => n.created_at > this.$store.state.lastNotificationRead).length)
+    ensureProfiles(from, to) {
+      if (!this.engine) return
+      const profileStore = useProfileStore()
+      const ids = this.engine.timeline.value
+      for (let i = Math.max(0, from); i <= Math.min(ids.length - 1, to); i++) {
+        const e = this.engine.getEvent(ids[i])
+        if (e) profileStore.ensure(e.pubkey)
       }
     },
 
-    addNotificationEvent(event) {
-      if (this.notifications.length === 0) {
-        this.notifications.push(event)
-        return
-      }
-
-      if (this.notifications[this.notifications.length - 1].created_at >= event.created_at) {
-        this.notifications.push(event)
-        return
-      }
-
-      if (this.notifications[0].created_at <= event.created_at) {
-        this.notifications.unshift(event)
-        return
-      }
-
-      let insertIndex = this.notifications.findIndex((n, i, ns) =>
-        n.created_at <= event.created_at &&
-        (i === 0 || ns[i - 1].created_at >= event.created_at)
-      )
-      if (insertIndex >= 0) {
-        this.notifications.splice(insertIndex, 0, event)
-        return
-      }
-
-      // the event is the oldest, add to end
-      this.notifications.push(event)
+    onVirtualScroll({ from, to }) {
+      this.ensureProfiles(from, to + 2)
+      if (this.engine && to >= this.items.length - 6) this.engine.loadMore()
     },
 
-    useProfile(pubkey) {
-      this.$store.dispatch('useProfile', {pubkey})
-    },
+    showNew() {
+      if (this.engine) this.engine.showNew()
+    }
   }
-}
+})
 </script>
+
+<style lang='scss'>
+.notif-scroll {
+  height: calc(100svh - 7rem);
+  overflow-y: auto;
+  overflow-anchor: none;
+  padding-bottom: 4rem;
+}
+</style>

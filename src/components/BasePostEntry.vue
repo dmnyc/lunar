@@ -598,17 +598,22 @@ export default {
       this.animateSendIcon()
       this.updateText()
       await this.extractMentions(this.textarea, this.tags)
-      let event
-      if (this.replyMode) event = await this.sendReply()
-      else if (this.messageMode) event = await this.sendMessage()
-      else event = await this.sendPost()
-      if (event) {
-        if (!this.messageMode) this.interpolateEventMentions(event)
-        this.reset()
-        this.$emit('sent', event)
-        if (!this.replyMode && !this.messageMode) this.toEvent(event.id)
+      try {
+        let event
+        if (this.replyMode) event = await this.sendReply()
+        else if (this.messageMode) event = await this.sendMessage()
+        else event = await this.sendPost()
+        if (event) {
+          if (!this.messageMode) this.interpolateEventMentions(event)
+          this.reset()
+          this.$emit('sent', event)
+          if (!this.replyMode && !this.messageMode) this.toEvent(event.id)
+        }
+      } catch (err) {
+        Notify.create({ message: err?.message || 'Failed to send post.', color: 'negative', timeout: 8000 })
+      } finally {
+        this.sending = false
       }
-      this.sending = false
     },
 
     async sendPost() {
@@ -662,8 +667,7 @@ export default {
         // if quote or repost, only tag this event and add mention to text
         let last = await getEventIdTagWithRelay(this.event.id, 'mention')
         tags.push(last)
-        // text += ` #[${tags.length - 1}]`
-        textarea.append(` #[${tags.length - 1}]`)
+        textarea.append(` nostr:${this.hexToBech32(this.event.id, 'note')}`)
       } else {
         // add the first and the last events being replied to
         let first = usableTags.find(([t, _, __, marker]) => t === 'e' && marker === 'root') || usableTags.find((tag) => tag[0] === 'e' && !tag[3])
@@ -822,7 +826,16 @@ export default {
         let range = new Range()
         range.setStart(mention.el, mention.pos + offset)
         range.setEnd(mention.el, mention.pos + mention.length + offset)
-        let newText = (mention.tag[0] === 'p' && !parseProfile) ? `@${mention.tag[1]}` : `#[${idx}]`
+        let newText
+        if (mention.tag[0] === 'p' && !parseProfile) {
+          newText = `@${mention.tag[1]}`
+        } else if (mention.tag[0] === 'p') {
+          newText = `nostr:${this.hexToBech32(mention.tag[1], 'npub')}`
+        } else if (mention.tag[0] === 'e') {
+          newText = `nostr:${this.hexToBech32(mention.tag[1], 'note')}`
+        } else {
+          newText = `#[${idx}]`
+        }
         this.insertText(newText, range)
         last = {
           el: mention.el,
