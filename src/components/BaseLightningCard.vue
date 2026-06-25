@@ -15,32 +15,47 @@
       </div>
       <div v-else-if='request.lnAddr' class='text-secondary'>{{ request.lnAddr }}</div>
 
-      <!-- amount picker (lnurl tips) -->
-      <div v-if='type === "lnurl"' class='flex row items-center justify-center' style='gap: .4rem; flex-wrap: wrap;'>
-        <q-btn
-          v-for='amt in presets'
-          :key='amt'
-          :label='String(amt)'
-          size='sm'
-          :outline='amount !== amt'
-          color='primary'
-          :text-color='amount === amt ? "dark" : undefined'
-          @click.stop='amount = amt'
+      <!-- amount + message (lnurl tips) -->
+      <div v-if='type === "lnurl"' class='flex column items-center' style='gap: .6rem; width: 100%;'>
+        <div class='flex row items-center justify-center' style='gap: .4rem; flex-wrap: wrap;'>
+          <q-btn
+            v-for='amt in presets'
+            :key='amt'
+            :label='String(amt)'
+            size='sm'
+            :outline='amount !== amt'
+            color='primary'
+            :text-color='amount === amt ? "dark" : undefined'
+            @click.stop='amount = amt'
+          />
+          <q-input v-model.number='amount' type='number' dense outlined label='sats' style='max-width: 6rem;'/>
+        </div>
+        <q-input
+          v-model='zapMessage'
+          dense
+          outlined
+          autogrow
+          label='message (optional)'
+          style='width: 100%; max-width: 20rem;'
+          maxlength='140'
+          @click.stop
         />
-        <q-input v-model.number='amount' type='number' dense outlined label='sats' style='max-width: 6rem;'/>
       </div>
 
       <!-- pay via Bitcoin Connect (WebLN / NWC / Alby, with its own QR) -->
-      <q-btn
-        :label='payLabel'
-        icon='bolt'
-        color='primary'
-        text-color='dark'
-        unelevated
-        :loading='paying'
-        :disable='type === "lnurl" && !amount'
-        @click.stop='pay'
-      />
+      <div class='flex column items-center' style='gap: .25rem;'>
+        <q-btn
+          :label='payLabel'
+          icon='bolt'
+          color='primary'
+          text-color='dark'
+          unelevated
+          :loading='paying'
+          :disable='type === "lnurl" && !amount'
+          @click.stop='pay'
+        />
+        <span v-if='walletName' class='text-caption' style='opacity: .55;'>via {{ walletName }}</span>
+      </div>
 
       <!-- raw lnurl/invoice QR for scanning with any wallet -->
       <q-btn :label='showQr ? "hide QR" : "show QR"' icon='qr_code_2' flat dense size='sm' @click.stop='showQr = !showQr'/>
@@ -56,6 +71,7 @@ import * as bolt11Parser from 'light-bolt11-decoder'
 import { utils } from 'lnurl-pay'
 import { Notify } from 'quasar'
 import { launchPayment } from '../nostr/wallet/bitcoinConnect'
+import { useWalletStore } from 'stores/wallet'
 
 export default {
   name: 'BaseLightningCard',
@@ -74,6 +90,7 @@ export default {
     return {
       request: {},
       amount: this.$store.state.config.preferences.lightningTips.presets[0],
+      zapMessage: '',
       paying: false,
       showQr: false,
     }
@@ -102,7 +119,11 @@ export default {
       return this.$store.state.config.preferences.lightningTips.presets
     },
     payLabel() {
-      return this.type === 'lnurl' ? `zap ${this.amount || 0}` : 'pay'
+      return this.type === 'lnurl' ? `tip ${this.amount || 0}` : 'pay'
+    },
+    walletName() {
+      const wallet = useWalletStore()
+      return wallet.connected ? wallet.activeWallet?.name || null : null
     },
   },
 
@@ -124,23 +145,33 @@ export default {
       try {
         let invoice = this.lnString
         if (this.type === 'lnurl') {
-          // zap-aware: attaches a signed NIP-57 zap request when supported
-          invoice = await this.getInvoice(this.lnString, this.amount, this.pubkey)
+          invoice = await this.getInvoice(this.lnString, this.amount, this.pubkey, null, this.zapMessage)
           if (!invoice || !invoice.toLowerCase().startsWith('lnbc')) {
             throw new Error('could not fetch an invoice for this user')
           }
         }
-        await launchPayment({
-          invoice,
-          onPaid: () => {
-            Notify.create({ message: this.type === 'lnurl' ? 'zapped ⚡' : 'payment sent ⚡' })
-            this.paying = false
-            this.$emit('paid')
-          },
-          onCancelled: () => { this.paying = false },
-        })
+
+        const wallet = useWalletStore()
+        if (wallet.connected) {
+          // Use the onboard NWC/WebLN wallet directly — no modal needed.
+          await wallet.payInvoice(invoice)
+          Notify.create({ message: this.type === 'lnurl' ? 'tipped ⚡' : 'payment sent ⚡' })
+          this.$emit('paid')
+        } else {
+          // No onboard wallet — fall back to the Bitcoin Connect modal.
+          await launchPayment({
+            invoice,
+            onPaid: () => {
+              Notify.create({ message: this.type === 'lnurl' ? 'tipped ⚡' : 'payment sent ⚡' })
+              this.paying = false
+              this.$emit('paid')
+            },
+            onCancelled: () => { this.paying = false },
+          })
+        }
       } catch (e) {
         Notify.create({ message: `payment failed: ${e?.message || e}`, color: 'negative' })
+      } finally {
         this.paying = false
       }
     },

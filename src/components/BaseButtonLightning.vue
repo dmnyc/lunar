@@ -12,6 +12,7 @@
     :ripple='false'
     dense
     :disable='loading'
+    style='padding: 0;'
   >
     <q-tooltip v-if='!loading'>
       tip with bitcoin lightning network

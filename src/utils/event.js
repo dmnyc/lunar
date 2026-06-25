@@ -69,16 +69,16 @@ export async function signAsynchronously(event, store) {
 
   // Fallback: a raw NIP-07 extension that was never wired through the signer.
   if (window.nostr) {
-    let signatureOrEvent = await withSignerTimeout(window.nostr.signEvent(event))
-    switch (typeof signatureOrEvent) {
-      case 'string':
-        event.sig = signatureOrEvent
-        break
-      case 'object':
-        event.sig = signatureOrEvent.sig
-        break
-      default:
-        throw new Error('Failed to sign with Nostr extension.')
+    const result = await withSignerTimeout(window.nostr.signEvent(event))
+    if (typeof result === 'string') {
+      event.sig = result
+    } else if (result && typeof result === 'object') {
+      // Extension returns the full signed event — use it wholesale so the
+      // id/sig pair is exactly what the extension computed (avoids mismatch
+      // if the extension's serialization differs from our getEventHash).
+      Object.assign(event, result)
+    } else {
+      throw new Error('Failed to sign with Nostr extension.')
     }
   }
   return event

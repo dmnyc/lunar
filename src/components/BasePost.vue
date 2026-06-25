@@ -198,67 +198,79 @@
               dense
               flat
               active-color='primary'
-              :size='highlighted ? "md" : "sm"'
               @click.stop
             >
-          <!-- <div v-if='replyMode && replyMode !== "tip"' class='text-primary text-thin col q-pl-xs' style=' font-size: 90%; font-weight: 300;'>{{replyMode}}</div> -->
-              <q-tab class='no-padding'>
-                <BaseButtonLightning
-                  v-if='$store.getters.profileLud06(event.pubkey)'
-                  :pubkey='event.pubkey'
-                  :size='highlighted ? "md" : "sm"'
-                />
-              </q-tab>
-              <q-tab class='no-padding' @click.stop='sendReaction'>
-                <q-icon
-                  :name='hasReacted ? "favorite" : "favorite_border"'
-                  :color='hasReacted ? "pink-4" : ""'
-                  :size='highlighted ? "md" : "sm"'
-                >
-                  <q-tooltip>{{ hasReacted ? "reacted" : "react" }}</q-tooltip>
-                </q-icon>
-                <span v-if='reactionCount' class='reaction-count'>{{ reactionCount }}</span>
-              </q-tab>
-              <q-tab name='embed' class='no-padding'>
-                <q-icon name='link' >
-                  <q-tooltip>
-                    embed
-                  </q-tooltip>
-                </q-icon>
-              </q-tab>
-              <q-tab name='repost' class='no-padding'>
-                <q-icon name='repeat' >
-                  <q-tooltip>
-                    repost
-                  </q-tooltip>
-                </q-icon>
-              </q-tab>
-              <q-tab name='quote' class='no-padding'>
-                <q-icon name='format_quote' >
-                  <q-tooltip>
-                    quote
-                  </q-tooltip>
-                </q-icon>
-              </q-tab>
-              <q-tab name='reply' class='no-padding no-wrap flex row'>
-                <div class='no-wrap flex row items-center self-start' style='gap: .5rem;'>
-                <q-icon name='chat_bubble_outline' class='flip-horizontal relative-position' >
-                  <q-tooltip>
-                    reply
-                  </q-tooltip>
-                </q-icon>
-                <span v-if='replyCount' style='position: abosolute; right: 0'>{{replyCount}}</span>
+              <!-- reply -->
+              <q-tab name='reply' class='no-padding'>
+                <div class='flex row no-wrap items-center' style='gap: .3rem;'>
+                  <q-icon name='chat_bubble_outline' :size='iconSize' class='flip-horizontal'/>
+                  <span v-if='replyCount' class='action-count'>{{ replyCount }}</span>
                 </div>
+                <q-tooltip>reply</q-tooltip>
               </q-tab>
+
+              <!-- like / reaction -->
+              <q-tab class='no-padding' @click.stop='sendReaction'>
+                <div class='flex row no-wrap items-center' style='gap: .3rem;'>
+                  <q-icon
+                    :name='hasReacted ? "favorite" : "favorite_border"'
+                    :color='hasReacted ? "pink-4" : ""'
+                    :size='iconSize'
+                  />
+                  <span v-if='reactionCount' class='action-count'>{{ reactionCount }}</span>
+                </div>
+                <q-tooltip>{{ hasReacted ? 'reacted' : 'react' }}</q-tooltip>
+              </q-tab>
+
+              <!-- repost — tap opens popup: repost | quote -->
+              <q-tab class='no-padding' @click.stop>
+                <q-icon name='repeat' :size='iconSize'/>
+                <q-tooltip>repost</q-tooltip>
+                <q-menu auto-close>
+                  <q-list dense style='min-width: 8rem;'>
+                    <q-item clickable @click.stop='replyMode = "repost"'>
+                      <q-item-section avatar><q-icon name='repeat' size='xs'/></q-item-section>
+                      <q-item-section>repost</q-item-section>
+                    </q-item>
+                    <q-item clickable @click.stop='replyMode = "quote"'>
+                      <q-item-section avatar><q-icon name='format_quote' size='xs'/></q-item-section>
+                      <q-item-section>quote</q-item-section>
+                    </q-item>
+                  </q-list>
+                </q-menu>
+              </q-tab>
+
+              <!-- zap -->
+              <q-tab class='no-padding' @click.stop='$store.getters.profileLud06(event.pubkey) ? showZapDialog = true : null'>
+                <div class='flex row no-wrap items-center' style='gap: .3rem;'>
+                  <q-icon
+                    name='bolt'
+                    :size='iconSize'
+                    :style='$store.getters.profileLud06(event.pubkey) ? "" : "opacity: .25;"'
+                  />
+                  <span v-if='zapTotal' class='action-count'>{{ zapTotal >= 1000 ? (zapTotal / 1000).toFixed(1) + "k" : zapTotal }}</span>
+                </div>
+                <q-tooltip>tip</q-tooltip>
+                <q-dialog v-model='showZapDialog' @click.stop>
+                  <BaseLightningCard
+                    :ln-string='$store.getters.profileLud06(event.pubkey)'
+                    :pubkey='event.pubkey'
+                    style='padding: 1.5rem;'
+                    @paid='showZapDialog = false'
+                  />
+                </q-dialog>
+              </q-tab>
+
+              <!-- embed / link — at the end -->
+              <q-tab name='embed' class='no-padding'>
+                <q-icon name='link' :size='iconSize'/>
+                <q-tooltip>copy event ID</q-tooltip>
+              </q-tab>
+
+              <!-- cancel active panel -->
               <q-tab v-if='replyMode && replyMode !== "tip"' class='no-padding' @click.stop='replyMode = null'>
-                <q-icon
-                  name="close"
-                  color='accent'
-                >
-                  <q-tooltip>
-                    cancel
-                  </q-tooltip>
-                </q-icon>
+                <q-icon name='close' :size='iconSize' color='accent'/>
+                <q-tooltip>cancel</q-tooltip>
               </q-tab>
             </q-tabs>
           <!-- </div> -->
@@ -317,8 +329,9 @@ import BaseButtonCopy from 'components/BaseButtonCopy.vue'
 import BaseMarkdown from 'components/BaseMarkdown.vue'
 import BaseRelayRecommend from 'components/BaseRelayRecommend.vue'
 import BaseButtonLightning from 'components/BaseButtonLightning.vue'
+import BaseLightningCard from 'components/BaseLightningCard.vue'
 import DOMPurify from 'dompurify'
-import { fetchReactionsFromCache } from '../nostr/reactions'
+import { fetchReactionsFromCache, fetchZapTotalFromCache } from '../nostr/reactions'
 import { useUserStore } from '../stores/user'
 
 export default defineComponent({
@@ -340,6 +353,7 @@ export default defineComponent({
     BaseMarkdown,
     BaseRelayRecommend,
     BaseButtonLightning,
+    BaseLightningCard,
   },
 
   data() {
@@ -358,10 +372,16 @@ export default defineComponent({
       reactionCount: 0,
       hasReacted: false,
       reactSending: false,
+      showZapDialog: false,
+      zapTotal: 0,
     }
   },
 
   computed: {
+    iconSize() {
+      return this.highlighted ? '22px' : '18px'
+    },
+
     // NIP-92 imeta: Map<url, {mimeType, alt}> parsed from ["imeta", "url <u>", "m <mime>", "alt <text>"] tags
     eventImeta() {
       const tags = this.event.tags || []
@@ -476,7 +496,10 @@ export default defineComponent({
     this.calcConnectorValues()
     this.$emit('mounted')
     this.isLongForm = this.event.content.length > 600 || this.event.content.split(/\r\n|\r|\n/).length > 10
-    if (!this.isEmbeded && this.event.kind === 1) this.loadReactions()
+    if (!this.isEmbeded && this.event.kind === 1) {
+      this.loadReactions()
+      this.loadZaps()
+    }
   },
 
   activated() {
@@ -496,6 +519,10 @@ export default defineComponent({
       const reactions = await fetchReactionsFromCache(this.event.id)
       this.reactionCount = reactions.length
       this.hasReacted = myPub ? reactions.some((r) => r.pubkey === myPub) : false
+    },
+
+    async loadZaps() {
+      this.zapTotal = await fetchZapTotalFromCache(this.event.id)
     },
 
     async sendReaction() {
@@ -589,7 +616,7 @@ export default defineComponent({
 })
 </script>
 <style lang="css" scoped>
-.reaction-count {
+.action-count {
   font-size: 0.7rem;
   line-height: 1;
   margin-left: 2px;

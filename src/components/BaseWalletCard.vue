@@ -200,7 +200,7 @@ export default defineComponent({
     txLabel(tx) {
       if (tx.pubkey) {
         const name = this.$store.getters.displayName(tx.pubkey)
-        return tx.type === 'incoming' ? `zap from ${name}` : `zap to ${name}`
+        return tx.type === 'incoming' ? `tip from ${name}` : `tip to ${name}`
       }
       return tx.description || (tx.type === 'incoming' ? 'received' : 'sent')
     },
