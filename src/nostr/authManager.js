@@ -1,24 +1,24 @@
 // Signer abstraction for astral — NIP-07, NIP-46 (bunker:// + nostrconnect://),
 // and local private key, behind one interface, on top of NDK.
 //
-// Ported from zapcooking src/lib/authManager.ts (TS → JS), with astral storage
-// keys and app identity. The NIP-46 handling (user-pubkey resolution via real
-// get_public_key RPC, NIP-44-aware local signer, signer/user pubkey binding,
-// reconnect, and universal nostrconnect:// pairing) is preserved verbatim in
-// spirit — that robustness is the whole point of using this instead of NDK's
-// signer directly.
+// NIP-46 uses nostr-tools BunkerSigner (not NDKNip46Signer). Root cause of the
+// old hang: NDKNip46Signer.sign() relied on startListening() being called, but
+// we intentionally bypass blockUntilReady() because it waits for a "connect"
+// response that Amber/Primal never send. BunkerSigner.fromBunker() calls
+// setupSubscription() immediately, so the sign_event response listener is always
+// active. See nip46Signer.js for the NDK adapter.
 
 import {
   NDKNip07Signer,
   NDKPrivateKeySigner,
-  NDKNip46Signer,
   NDKSubscriptionCacheUsage
 } from '@nostr-dev-kit/ndk'
 import { nip19, getPublicKey, generateSecretKey } from 'nostr-tools'
+import { BunkerSigner } from 'nostr-tools/nip46'
 import * as nip44 from 'nostr-tools/nip44'
 import * as nip04 from 'nostr-tools/nip04'
-import { fetchNip46UserPubkey, sendNip46Rpc } from './nip46Rpc'
-import { Nip44LocalSigner } from './nip44LocalSigner'
+import { hexToBytes } from '@noble/hashes/utils'
+import { Nip46NdkSigner } from './nip46Signer'
 
 const browser = typeof window !== 'undefined'
 const APP_NAME = 'lunar'
@@ -49,7 +49,7 @@ export class AuthManager {
       error: null
     }
     this.listeners = []
-    this.nip46Signer = null
+    this.bunkerSigner = null    // nostr-tools BunkerSigner (NIP-46 only)
     this.nip46ResponseSub = null
     this.initializeFromStorage()
   }
@@ -70,31 +70,30 @@ export class AuthManager {
     this.listeners.forEach((listener) => listener(this.authState))
   }
 
-  async fetchNip46UserPubkey() {
-    if (!this.nip46Signer) throw new Error('NIP-46 signer not initialized')
-    // Generous timeout: this is the single wait that covers the signer
-    // processing our connect + the user approving in the signer app.
-    return fetchNip46UserPubkey(this.nip46Signer, 60000)
-  }
+  // ── NIP-46 helpers ───────────────────────────────────────────────────────
 
-  // Pair the client with the remote signer before any other RPC. Some signers
-  // (e.g. Clave) reject get_public_key with "Client not paired" until they
-  // receive a `connect` carrying the bunker secret — NDK's blockUntilReady
-  // doesn't reliably send that, so we issue an explicit connect first, then
-  // fall back to blockUntilReady for NDK's internal readiness state.
-  async pairWithSigner(signerPubkey, secret) {
-    // Fire the NIP-46 connect (carrying the bunker secret so signers like Clave
-    // pair) but DON'T await its reply: many signers (Amber, Primal) never send
-    // a connect response, so awaiting it stalls for the full timeout. The
-    // following get_public_key is the real readiness signal — the signer
-    // answers it once it has processed connect (and the user approved). This is
-    // a single wait instead of two sequential ones, matching other clients.
-    const params = secret ? [signerPubkey, secret] : [signerPubkey]
-    sendNip46Rpc(this.nip46Signer, 'connect', params, 60000).catch((e) =>
-      console.warn('[NIP-46] connect rpc (non-blocking):', e?.message || e)
-    )
-    // brief settle so the connect event lands before get_public_key
+  // Create a BunkerSigner and wire it up as ndk.signer.
+  // Fires connect non-blocking (Amber never sends a response; awaiting it
+  // stalls). getPublicKey is the real readiness signal.
+  async _createAndBindBunkerSigner(localPrivateKeyBytes, signerPubkey, relays, secret) {
+    const bs = BunkerSigner.fromBunker(localPrivateKeyBytes, { pubkey: signerPubkey, relays, secret })
+    // Fire connect but don't await — many signers never acknowledge it.
+    bs.connect().catch((e) => console.warn('[NIP-46] connect (non-blocking):', e?.message || e))
     await new Promise((r) => setTimeout(r, 250))
+
+    // Generous timeout: covers bunker processing + user approval in the signer app.
+    const userPubkey = await Promise.race([
+      bs.getPublicKey(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('get_public_key timed out')), 60000))
+    ])
+
+    if (!/^[0-9a-f]{64}$/.test(userPubkey)) throw new Error(`invalid pubkey from bunker: ${userPubkey}`)
+
+    this.bunkerSigner = bs
+    const user = this.ndk.getUser({ pubkey: userPubkey })
+    this.ndk.signer = new Nip46NdkSigner(bs, userPubkey)
+    this.ndk.activeUser = user
+    return { userPubkey, user }
   }
 
   async initializeFromStorage() {
@@ -248,28 +247,19 @@ export class AuthManager {
       if (!browser) throw new Error('Browser environment required')
       const { signerPubkey, relays, secret } = this.parseNIP46ConnectionString(connectionString)
 
-      const localPrivateKey = bytesToHex(generateSecretKey())
-      const localSigner = new Nip44LocalSigner(localPrivateKey)
+      const localPrivateKeyBytes = generateSecretKey()
+      const localPrivateKey = bytesToHex(localPrivateKeyBytes)
 
       for (const relay of relays) {
-        try {
-          this.ndk.addExplicitRelay(relay)
-        } catch (e) {
+        try { this.ndk.addExplicitRelay(relay) } catch (e) {
           console.warn('[NIP-46] Failed to add relay:', relay, e)
         }
       }
       await this.ndk.connect()
 
-      const signerToken = secret ? `${signerPubkey}#${secret}` : signerPubkey
-      this.nip46Signer = new NDKNip46Signer(this.ndk, signerToken, localSigner)
-      this.primeSignerPubkeys(signerPubkey)
-      this.ndk.signer = this.nip46Signer
-
-      await this.pairWithSigner(signerPubkey, secret)
-
-      const userPubkey = await this.fetchNip46UserPubkey()
-      const user = this.ndk.getUser({ pubkey: userPubkey })
-      this.bindUserToSigner(user)
+      const { userPubkey, user } = await this._createAndBindBunkerSigner(
+        localPrivateKeyBytes, signerPubkey, relays, secret
+      )
 
       this.updateState({
         isAuthenticated: true,
@@ -287,7 +277,7 @@ export class AuthManager {
       localStorage.setItem(LS_NIP46, JSON.stringify(nip46Info))
       return userPubkey
     } catch (error) {
-      this.nip46Signer = null
+      this.bunkerSigner = null
       this.failAuth(error, 'Failed to connect to bunker')
       throw error
     }
@@ -297,45 +287,37 @@ export class AuthManager {
     this.updateState({ isLoading: true, error: null })
     try {
       const localPrivateKey = nip46Info.localPrivateKey || bytesToHex(generateSecretKey())
-      const localSigner = new Nip44LocalSigner(localPrivateKey)
+      const localPrivateKeyBytes = hexToBytes(localPrivateKey)
 
       for (const relay of nip46Info.relays) {
-        try {
-          this.ndk.addExplicitRelay(relay)
-        } catch (e) {
+        try { this.ndk.addExplicitRelay(relay) } catch (e) {
           console.warn('[NIP-46] Failed to add relay:', relay, e)
         }
       }
       await this.ndk.connect()
 
-      const signerToken = nip46Info.secret
-        ? `${nip46Info.signerPubkey}#${nip46Info.secret}`
-        : nip46Info.signerPubkey
-      this.nip46Signer = new NDKNip46Signer(this.ndk, signerToken, localSigner)
-      this.primeSignerPubkeys(nip46Info.signerPubkey)
-      this.ndk.signer = this.nip46Signer
-
-      try {
-        await this.pairWithSigner(nip46Info.signerPubkey, nip46Info.secret)
-      } catch (e) {
-        console.warn('[NIP-46] Reconnection session establishment failed/timed out:', e)
-      }
-
       let userPubkey = nip46Info.userPubkey
       try {
-        const actual = await this.fetchNip46UserPubkey()
-        userPubkey = actual
-        if (nip46Info.userPubkey !== actual) {
-          nip46Info.userPubkey = actual
+        const result = await this._createAndBindBunkerSigner(
+          localPrivateKeyBytes, nip46Info.signerPubkey, nip46Info.relays, nip46Info.secret
+        )
+        userPubkey = result.userPubkey
+        if (nip46Info.userPubkey !== userPubkey) {
+          nip46Info.userPubkey = userPubkey
           localStorage.setItem(LS_NIP46, JSON.stringify(nip46Info))
-          localStorage.setItem(LS_PUBKEY, actual)
+          localStorage.setItem(LS_PUBKEY, userPubkey)
         }
       } catch (e) {
-        console.warn('[NIP-46] Could not get user pubkey, using stored value:', e)
+        console.warn('[NIP-46] Reconnect failed, using stored pubkey:', e)
+        // Restore a minimal signer so signing attempts give a clear error
+        // rather than silently hanging.
+        this.bunkerSigner = null
+        this.ndk.signer = undefined
       }
 
       const user = this.ndk.getUser({ pubkey: userPubkey })
-      this.bindUserToSigner(user)
+      if (!this.ndk.activeUser) this.ndk.activeUser = user
+
       this.updateState({
         isAuthenticated: true,
         user,
@@ -346,7 +328,7 @@ export class AuthManager {
       })
       return userPubkey
     } catch (error) {
-      this.nip46Signer = null
+      this.bunkerSigner = null
       this.updateState({
         isAuthenticated: false,
         user: null,
@@ -393,9 +375,7 @@ export class AuthManager {
     const uri = `nostrconnect://${localPubkey}?${params.toString()}`
 
     for (const relay of relays) {
-      try {
-        this.ndk.addExplicitRelay(relay)
-      } catch (e) {
+      try { this.ndk.addExplicitRelay(relay) } catch (e) {
         console.warn('[NIP-46] Failed to add relay:', relay, e)
       }
     }
@@ -405,9 +385,7 @@ export class AuthManager {
   }
 
   async decryptNip44(ciphertext, senderPubkey, recipientPrivateKey) {
-    const privateKeyBytes = new Uint8Array(
-      recipientPrivateKey.match(/.{1,2}/g).map((b) => parseInt(b, 16))
-    )
+    const privateKeyBytes = hexToBytes(recipientPrivateKey)
     try {
       const conversationKey = nip44.v2.utils.getConversationKey(privateKeyBytes, senderPubkey)
       return nip44.v2.decrypt(ciphertext, conversationKey)
@@ -525,26 +503,18 @@ export class AuthManager {
 
     this.updateState({ isLoading: true, error: null })
     try {
-      const localSigner = new Nip44LocalSigner(pendingInfo.localPrivateKey)
+      const localPrivateKeyBytes = hexToBytes(pendingInfo.localPrivateKey)
+
       for (const relay of pendingInfo.relays) {
-        try {
-          this.ndk.addExplicitRelay(relay)
-        } catch (e) {
+        try { this.ndk.addExplicitRelay(relay) } catch (e) {
           console.warn('[NIP-46] Failed to add relay:', relay, e)
         }
       }
       await this.ndk.connect()
 
-      const signerToken = pendingInfo.secret ? `${signerPubkey}#${pendingInfo.secret}` : signerPubkey
-      this.nip46Signer = new NDKNip46Signer(this.ndk, signerToken, localSigner)
-      this.primeSignerPubkeys(signerPubkey)
-      this.ndk.signer = this.nip46Signer
-
-      await this.pairWithSigner(signerPubkey, pendingInfo.secret)
-
-      const userPubkey = await this.fetchNip46UserPubkey()
-      const user = this.ndk.getUser({ pubkey: userPubkey })
-      this.bindUserToSigner(user)
+      const { userPubkey, user } = await this._createAndBindBunkerSigner(
+        localPrivateKeyBytes, signerPubkey, pendingInfo.relays, pendingInfo.secret
+      )
 
       const nip46Info = {
         signerPubkey,
@@ -570,31 +540,10 @@ export class AuthManager {
       })
       return userPubkey
     } catch (error) {
-      this.nip46Signer = null
+      this.bunkerSigner = null
       this.ndk.signer = undefined
       this.failAuth(error, 'Failed to complete pairing')
       throw error
-    }
-  }
-
-  // NDKNip46Signer.user() returns the SIGNER pubkey, not the user pubkey, and
-  // never updates it. For bunkers whose signer pubkey differs from the user
-  // pubkey, point the signer's reported user at the real user so signed events
-  // carry the correct pubkey.
-  bindUserToSigner(user) {
-    if (this.nip46Signer) this.nip46Signer.remoteUser = user
-    this.ndk.activeUser = user
-  }
-
-  primeSignerPubkeys(signerPubkey) {
-    try {
-      this.nip46Signer.bunkerPubkey = signerPubkey
-      this.nip46Signer._bunkerPubkey = signerPubkey
-      this.nip46Signer.userPubkey = signerPubkey
-      this.nip46Signer._userPubkey = signerPubkey
-      this.nip46Signer._remoteUser = this.ndk.getUser({ pubkey: signerPubkey })
-    } catch (e) {
-      console.warn('[NIP-46] Could not set signer properties:', e)
     }
   }
 
@@ -615,7 +564,10 @@ export class AuthManager {
   }
 
   async logout() {
-    if (this.nip46Signer) this.nip46Signer = null
+    if (this.bunkerSigner) {
+      this.bunkerSigner.close().catch(() => {})
+      this.bunkerSigner = null
+    }
     if (this.nip46ResponseSub) {
       this.nip46ResponseSub.stop()
       this.nip46ResponseSub = null
