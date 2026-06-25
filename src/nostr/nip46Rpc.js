@@ -1,15 +1,13 @@
-// Low-level NIP-46 JSON-RPC helpers.
+// NIP-46 JSON-RPC helpers for callers that need raw RPC access (e.g.
+// encryptionService nip44_encrypt/decrypt).
 //
-// NDK's NDKNip46Signer only wraps a subset of NIP-46 methods. For methods it
-// doesn't expose (get_public_key, nip44_encrypt/decrypt) we drive the signer's
-// already-connected RPC channel (signer.rpc) directly.
-//
-// Ported from zapcooking src/lib/nip46Rpc.ts.
+// Supports the nostr-tools BunkerSigner path (via Nip46NdkSigner.bunkerSigner)
+// used after the NDKNip46Signer → BunkerSigner migration. The old NDK signer
+// path is kept as a fallback for any code that hasn't been updated yet.
 
-const NIP46_KIND = 24133
 const DEFAULT_TIMEOUT_MS = 15000
 
-function getChannel(signer) {
+function getOldChannel(signer) {
   if (!signer.rpc || typeof signer.rpc.sendRequest !== 'function') {
     throw new Error('NIP-46 signer RPC channel not available')
   }
@@ -19,15 +17,23 @@ function getChannel(signer) {
   return { rpc: signer.rpc, remotePubkey: signer.remotePubkey }
 }
 
-// Issue a NIP-46 JSON-RPC request and resolve with the result string. An
-// explicit empty-string result is valid; a missing/non-string result with no
-// error is treated as a protocol failure.
 export async function sendNip46Rpc(signer, method, params, timeoutMs = DEFAULT_TIMEOUT_MS) {
-  const { rpc, remotePubkey } = getChannel(signer)
+  // nostr-tools BunkerSigner path (Nip46NdkSigner wraps bunkerSigner)
+  if (signer?.bunkerSigner) {
+    return Promise.race([
+      signer.bunkerSigner.sendRequest(method, params),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error(`${method} timed out`)), timeoutMs)
+      )
+    ])
+  }
+
+  // Legacy NDK NDKNip46Signer path
+  const { rpc, remotePubkey } = getOldChannel(signer)
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`${method} timed out`)), timeoutMs)
     try {
-      rpc.sendRequest(remotePubkey, method, params, NIP46_KIND, (response) => {
+      rpc.sendRequest(remotePubkey, method, params, 24133, (response) => {
         clearTimeout(timer)
         if (response?.error) {
           reject(new Error(`${method}: ${response.error}`))
@@ -46,9 +52,6 @@ export async function sendNip46Rpc(signer, method, params, timeoutMs = DEFAULT_T
   })
 }
 
-// Resolve the user's actual pubkey via get_public_key. NDK's signer.user() is
-// synchronous and returns the signer service pubkey from the constructor, not
-// the user identity — using it logs sessions in as the signer service.
 export async function fetchNip46UserPubkey(signer, timeoutMs = DEFAULT_TIMEOUT_MS) {
   const result = await sendNip46Rpc(signer, 'get_public_key', [], timeoutMs)
   const pubkey = result.trim().toLowerCase()
@@ -59,9 +62,25 @@ export async function fetchNip46UserPubkey(signer, timeoutMs = DEFAULT_TIMEOUT_M
 }
 
 export async function nip44EncryptViaNip46(signer, recipientPubkey, plaintext, timeoutMs = DEFAULT_TIMEOUT_MS) {
+  if (signer?.bunkerSigner) {
+    return Promise.race([
+      signer.bunkerSigner.nip44Encrypt(recipientPubkey, plaintext),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('nip44_encrypt timed out')), timeoutMs)
+      )
+    ])
+  }
   return sendNip46Rpc(signer, 'nip44_encrypt', [recipientPubkey, plaintext], timeoutMs)
 }
 
 export async function nip44DecryptViaNip46(signer, senderPubkey, ciphertext, timeoutMs = DEFAULT_TIMEOUT_MS) {
+  if (signer?.bunkerSigner) {
+    return Promise.race([
+      signer.bunkerSigner.nip44Decrypt(senderPubkey, ciphertext),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('nip44_decrypt timed out')), timeoutMs)
+      )
+    ])
+  }
   return sendNip46Rpc(signer, 'nip44_decrypt', [senderPubkey, ciphertext], timeoutMs)
 }

@@ -15,7 +15,8 @@ import { nip44EncryptViaNip46, nip44DecryptViaNip46 } from './nip46Rpc'
 
 function signerIsNip46() {
   const name = ndk.signer?.constructor?.name || ''
-  return name.includes('Nip46Signer')
+  // Matches both old NDKNip46Signer and new Nip46NdkSigner
+  return name.includes('Nip46')
 }
 
 function hasNip07Nip44() {
